@@ -1,7 +1,7 @@
 //! Virtual Machine Core
 //!
 //! Vyauma Virtual Machine execution engine.
-//! Implements minimal instruction semantics as per bytecode spec v0.1.
+//! Implements instruction semantics as per bytecode spec v0.1.
 
 use crate::config::VreConfig;
 use crate::error::{VreError, VreResult};
@@ -84,6 +84,10 @@ impl VirtualMachine {
                 Ok(())
             }
 
+            OpCode::Dup => {
+                self.stack.dup()
+            }
+
             OpCode::Add => {
                 let b = match self.stack.pop()? {
                     Value::Number(n) => n,
@@ -96,6 +100,52 @@ impl VirtualMachine {
                 };
 
                 self.stack.push(Value::Number(a + b))
+            }
+
+            OpCode::Sub => {
+                let b = match self.stack.pop()? {
+                    Value::Number(n) => n,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+
+                let a = match self.stack.pop()? {
+                    Value::Number(n) => n,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+
+                self.stack.push(Value::Number(a - b))
+            }
+
+            OpCode::Mul => {
+                let b = match self.stack.pop()? {
+                    Value::Number(n) => n,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+
+                let a = match self.stack.pop()? {
+                    Value::Number(n) => n,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+
+                self.stack.push(Value::Number(a * b))
+            }
+
+            OpCode::Div => {
+                let b = match self.stack.pop()? {
+                    Value::Number(n) => n,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+
+                let a = match self.stack.pop()? {
+                    Value::Number(n) => n,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+
+                if b == 0.0 {
+                    return Err(VreError::DivisionByZero);
+                }
+
+                self.stack.push(Value::Number(a / b))
             }
 
             _ => Err(VreError::RuntimeFault),
