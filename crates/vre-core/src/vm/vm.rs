@@ -1,7 +1,7 @@
 //! Virtual Machine Core
 //!
-//! Defines the Vyauma Virtual Machine structure and execution loop.
-//! Instruction semantics are intentionally minimal in v0.1.
+//! Vyauma Virtual Machine execution engine.
+//! Implements minimal instruction semantics as per bytecode spec v0.1.
 
 use crate::config::VreConfig;
 use crate::error::{VreError, VreResult};
@@ -61,50 +61,44 @@ impl VirtualMachine {
         Ok(())
     }
 
-    /// Execute a single instruction (dispatch only)
+    /// Execute a single instruction
     fn step(&mut self) -> VreResult<()> {
         let opcode_byte = self.read_u8()?;
         let opcode = OpCode::from_u8(opcode_byte)
             .ok_or(VreError::InvalidOpcode(opcode_byte))?;
 
         match opcode {
-            OpCode::Nop => Ok(()),
             OpCode::Halt => {
                 self.halted = true;
                 Ok(())
             }
 
-            // Stack
-            OpCode::Push
-            | OpCode::Pop
-            | OpCode::Dup
+            OpCode::Push => {
+                let index = self.read_u8()? as usize;
+                let value = self.constants.get(index)?;
+                self.stack.push(value)
+            }
 
-            // Locals
-            | OpCode::LoadLocal
-            | OpCode::StoreLocal
+            OpCode::Pop => {
+                self.stack.pop()?;
+                Ok(())
+            }
 
-            // Arithmetic
-            | OpCode::Add
-            | OpCode::Sub
-            | OpCode::Mul
-            | OpCode::Div
-            | OpCode::Mod
-            | OpCode::Neg
+            OpCode::Add => {
+                let b = match self.stack.pop()? {
+                    Value::Number(n) => n,
+                    _ => return Err(VreError::TypeMismatch),
+                };
 
-            // Comparison
-            | OpCode::Equal
-            | OpCode::NotEqual
-            | OpCode::Less
-            | OpCode::LessEqual
-            | OpCode::Greater
-            | OpCode::GreaterEqual
+                let a = match self.stack.pop()? {
+                    Value::Number(n) => n,
+                    _ => return Err(VreError::TypeMismatch),
+                };
 
-            // Control flow
-            | OpCode::Jump
-            | OpCode::JumpIf
-            | OpCode::Call
-            | OpCode::Return
-            => Err(VreError::RuntimeFault),
+                self.stack.push(Value::Number(a + b))
+            }
+
+            _ => Err(VreError::RuntimeFault),
         }
     }
 
@@ -116,12 +110,5 @@ impl VirtualMachine {
         let byte = self.instructions[self.ip];
         self.ip += 1;
         Ok(byte)
-    }
-
-    /// Read a big-endian u16 operand
-    fn read_u16(&mut self) -> VreResult<u16> {
-        let high = self.read_u8()? as u16;
-        let low = self.read_u8()? as u16;
-        Ok((high << 8) | low)
     }
 }
