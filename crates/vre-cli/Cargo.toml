@@ -1,0 +1,9 @@
+[package]
+name = "vre-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Vyauma Runtime Engine CLI"
+license = "Apache-2.0"
+
+[dependencies]
+vre-core = { path = "../vre-core" }

@@ -39,6 +39,9 @@ pub enum OpCode {
     Call    = 0x42,
     Return  = 0x43,
 
+    // External interaction (gated by Suraksha)
+    ExternalCall = 0x50,
+
     // System
     Nop  = 0xF0,
     Halt = 0xFF,
@@ -73,6 +76,7 @@ impl OpCode {
             0x41 => Some(OpCode::JumpIf),
             0x42 => Some(OpCode::Call),
             0x43 => Some(OpCode::Return),
+                    0x50 => Some(OpCode::ExternalCall),
 
             0xF0 => Some(OpCode::Nop),
             0xFF => Some(OpCode::Halt),
