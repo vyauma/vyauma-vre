@@ -1,0 +1,10 @@
+[package]
+name = "vre-debug"
+version = "0.2.0"
+edition = "2021"
+description = "Vyauma Runtime Engine — Standalone bytecode debugger"
+license = "Apache-2.0"
+
+[dependencies]
+vre-core = { path = "../vre-core" }
+vre-compiler = { path = "../vre-compiler" }

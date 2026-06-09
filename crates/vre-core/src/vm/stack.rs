@@ -22,6 +22,11 @@ impl Stack {
         }
     }
 
+    /// Get stack elements
+    pub fn elements(&self) -> &[Value] {
+        &self.values
+    }
+
     /// Push value onto stack
     pub fn push(&mut self, value: Value) -> VreResult<()> {
         if self.values.len() >= self.max_size {
@@ -57,8 +62,17 @@ impl Stack {
         self.values.is_empty()
     }
 
+    /// Truncate the stack to a specific depth
+    pub fn truncate(&mut self, depth: usize) {
+        self.values.truncate(depth);
+    }
+
     /// Clear stack
     pub fn clear(&mut self) {
         self.values.clear();
+    }
+
+    pub fn values(&self) -> &[Value] {
+        &self.values
     }
 }

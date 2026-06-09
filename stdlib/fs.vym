@@ -1,0 +1,23 @@
+fn fs_exists(path) {
+    return ffi_fs_exists(path);
+}
+
+fn fs_delete(path) {
+    return ffi_fs_delete(path);
+}
+
+fn fs_size(path) {
+    return ffi_fs_size(path);
+}
+
+fn fs_read_file(path) {
+    return ffi_fs_read_file(path);
+}
+
+fn fs_write_file(path, content) {
+    return ffi_fs_write_file(path, content);
+}
+
+fn fs_append_file(path, content) {
+    return ffi_fs_append_file(path, content);
+}

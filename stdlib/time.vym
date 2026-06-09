@@ -1,0 +1,3 @@
+fn time_now_ms() {
+    return ffi_time_now_ms();
+}

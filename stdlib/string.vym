@@ -1,0 +1,15 @@
+fn to_bytes(s) {
+    return string_to_bytes(s);
+}
+
+fn from_bytes(arr) {
+    return bytes_to_string(arr);
+}
+
+fn split(s, delimiter) {
+    return ffi_string_split(s, delimiter);
+}
+
+fn starts_with(s, prefix) {
+    return ffi_string_starts_with(s, prefix);
+}

@@ -1,0 +1,45 @@
+import "string.vy"
+
+
+
+// Parses an raw HTTP request string into a Vyauma Dictionary
+// Example input: "GET /api/users HTTP/1.1\r\nHost: localhost\r\n\r\n{\"name\":\"test\"}"
+fn parse_http_request(raw_string) {
+    let parts = split(raw_string, "\r\n\r\n");
+    let req = {};
+    if ffi_array_len(parts) < 2 {
+        req["method"] = "INVALID";
+        return req;
+    }
+    
+    let headers_part = parts[0];
+    let body_part = parts[1];
+    
+    // Parse the first line (e.g. GET /api/users HTTP/1.1)
+    let lines = split(headers_part, "\r\n");
+    if ffi_array_len(lines) < 1 {
+        req["method"] = "INVALID";
+        return req;
+    }
+    let first_line = lines[0];
+    
+    let request_line = split(first_line, " ");
+    if ffi_array_len(request_line) < 2 {
+        req["method"] = "INVALID";
+        return req;
+    }
+    
+    req["method"] = request_line[0];
+    req["path"] = request_line[1];
+    
+    // Let's implement array length natively if needed, but for now we'll just try
+    // A better way is a native FFI for len(array), but let's try to extract body by checking if `raw_string` has `\r\n\r\n`
+    // Wait, split() returns array. If no \r\n\r\n, parts[1] might cause RuntimeFault (index out of bounds).
+    // Let's add `ffi_array_len` quickly so we can do this safely!
+    // No, I can just write a wrapper or assume there is always \r\n\r\n because HTTP standard requires it!
+    // HTTP requires \r\n\r\n even if body is empty. So parts will always have 2 elements! parts[1] will be "".
+    
+    req["body"] = parts[1];
+
+    return req;
+}

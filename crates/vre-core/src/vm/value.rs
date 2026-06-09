@@ -17,4 +17,7 @@ pub enum Value {
 
     /// Opaque reference (reserved for future extensions)
     Ref(u32),
+
+    /// String literal value
+    String(String),
 }

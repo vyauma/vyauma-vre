@@ -1,0 +1,13 @@
+[package]
+name = "vre-asm"
+version = "0.2.0"
+edition = "2021"
+description = "Vyauma Runtime Engine — .vasm assembler that emits .vyma bytecode"
+license = "Apache-2.0"
+
+[[bin]]
+name = "vre-asm"
+path = "src/main.rs"
+
+[dependencies]
+vre-core = { path = "../vre-core" }

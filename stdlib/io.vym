@@ -1,0 +1,19 @@
+fn read_all(client) {
+    let buf = string_to_bytes("                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        ");
+    let bytes_read = read(client.fd, buf);
+    if bytes_read > 0 {
+        return bytes_to_string(buf);
+    }
+    return "";
+}
+
+fn write_all(client, text) {
+    let bytes = string_to_bytes(text);
+    let bytes_written = write(client.fd, bytes);
+    return bytes_written;
+}
+
+fn close_conn(client) {
+    close(client.fd);
+    return 0;
+}

@@ -1,0 +1,7 @@
+fn random_bytes(len) {
+    return ffi_crypto_random_bytes(len);
+}
+
+fn sha256(data) {
+    return ffi_crypto_sha256(data);
+}

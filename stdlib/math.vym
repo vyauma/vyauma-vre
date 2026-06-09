@@ -1,0 +1,35 @@
+fn math_abs(x) {
+    return ffi_math_abs(x);
+}
+
+fn math_floor(x) {
+    return ffi_math_floor(x);
+}
+
+fn math_ceil(x) {
+    return ffi_math_ceil(x);
+}
+
+fn math_round(x) {
+    return ffi_math_round(x);
+}
+
+fn math_sin(x) {
+    return ffi_math_sin(x);
+}
+
+fn math_cos(x) {
+    return ffi_math_cos(x);
+}
+
+fn math_tan(x) {
+    return ffi_math_tan(x);
+}
+
+fn math_sqrt(x) {
+    return ffi_math_sqrt(x);
+}
+
+fn math_pow(x, y) {
+    return ffi_math_pow(x, y);
+}

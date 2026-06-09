@@ -37,6 +37,9 @@ pub enum VreError {
 
     // IO boundary
     IoError(String),
+
+    // FFI Error
+    NativeFunctionError(String),
 }
 
 impl fmt::Display for VreError {
@@ -86,6 +89,8 @@ impl fmt::Display for VreError {
 
             VreError::IoError(msg) =>
                 write!(f, "io error: {}", msg),
+            VreError::NativeFunctionError(msg) =>
+                write!(f, "native function error: {}", msg),
         }
     }
 }

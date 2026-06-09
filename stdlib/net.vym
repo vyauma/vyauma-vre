@@ -1,0 +1,36 @@
+struct TcpServer {
+    fd
+}
+
+struct TcpClient {
+    fd
+}
+
+fn create_server(port) {
+    let server_fd = net_listen(port);
+    if server_fd == 0 - 1 {
+        return 0; // or null, but Vyauma functions return 0 if no explicit return? We return 0 on fail.
+    }
+    return new TcpServer {
+        fd: server_fd
+    };
+}
+
+fn accept_client(server) {
+    let client_fd = net_accept(server.fd);
+    if client_fd == 0 - 1 {
+        return 0;
+    }
+    return new TcpClient {
+        fd: client_fd
+    };
+}
+
+fn set_nonblocking(stream_or_listener) {
+    net_set_nonblocking(stream_or_listener.fd, 1);
+    return 0;
+}
+
+fn poll_events() {
+    return net_poll();
+}

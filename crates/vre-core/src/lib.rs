@@ -12,12 +12,15 @@ pub mod bytecode;
 pub mod vm;
 pub mod loader;
 pub mod capability;
+pub mod crypto;
+pub mod jit;
 
 // Public error & configuration types
 pub use error::{VreError, VreResult};
 pub use config::VreConfig;
 
 // Public-facing capability system
+pub use capability::capability::Capability;
 pub use capability::registry::CapabilityRegistry;
 
 // Public-facing loader abstraction

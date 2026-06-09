@@ -39,9 +39,26 @@ pub enum OpCode {
     Call    = 0x42,
     Return  = 0x43,
 
+    // Heap and Objects
+    NewArray     = 0x50,
+    LoadElement  = 0x51,
+    StoreElement = 0x52,
+    NewStruct     = 0x53,
+    LoadProperty  = 0x54,
+    StoreProperty = 0x55,
+
+    // FFI Native Call
+    CallNative = 0x56,
+
+    // Exception Handling
+    TryStart = 0x60,
+    TryEnd   = 0x61,
+    Throw    = 0x62,
+
     // System
-    Nop  = 0xF0,
-    Halt = 0xFF,
+    Nop     = 0xF0,
+    Syscall = 0xF1,
+    Halt    = 0xFF,
 }
 
 impl OpCode {
@@ -74,7 +91,20 @@ impl OpCode {
             0x42 => Some(OpCode::Call),
             0x43 => Some(OpCode::Return),
 
+            0x50 => Some(OpCode::NewArray),
+            0x51 => Some(OpCode::LoadElement),
+            0x52 => Some(OpCode::StoreElement),
+            0x53 => Some(OpCode::NewStruct),
+            0x54 => Some(OpCode::LoadProperty),
+            0x55 => Some(OpCode::StoreProperty),
+            0x56 => Some(OpCode::CallNative),
+
+            0x60 => Some(OpCode::TryStart),
+            0x61 => Some(OpCode::TryEnd),
+            0x62 => Some(OpCode::Throw),
+
             0xF0 => Some(OpCode::Nop),
+            0xF1 => Some(OpCode::Syscall),
             0xFF => Some(OpCode::Halt),
 
             _ => None,

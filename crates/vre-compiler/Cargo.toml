@@ -1,0 +1,9 @@
+[package]
+name = "vre-compiler"
+version = "0.2.0"
+edition = "2021"
+description = "Vyauma Runtime Engine — Compiler from .vym source to VRE bytecode"
+license = "Apache-2.0"
+
+[dependencies]
+vre-core = { path = "../vre-core" }
