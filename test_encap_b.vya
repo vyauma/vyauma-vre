@@ -1,0 +1,5 @@
+import "test_encap_a"
+
+fn main() {
+    ffi_console_println("Secret: " + test_encap_a__secret_func());
+}

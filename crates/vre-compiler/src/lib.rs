@@ -6,7 +6,7 @@ pub mod parser_indent;
 pub mod compiler;
 pub mod type_checker;
 pub mod optimizer;
-
+pub mod vir;
 use crate::ast::{Program, Expr, Stmt};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
