@@ -89,65 +89,84 @@ Operands are consumed **inline** from the instruction stream (not a separate sec
 
 | Opcode | Byte | Operand | Stack Effect | Description |
 |--------|------|---------|--------------|-------------|
-| `LoadLocal`  | `0x10` | u16 — local index | `( -- value )` | Push local variable |
+| `LoadLocal`  | `0x10` | u16 — local index | `( -- value )` | Push generic local variable |
 | `StoreLocal` | `0x11` | u16 — local index | `( value -- )` | Pop into local variable |
+| `LoadLocalI32`|`0x12` | u16 — local index | `( -- value )` | Push I32 local variable |
+| `LoadLocalI64`|`0x13` | u16 — local index | `( -- value )` | Push I64 local variable |
+| `LoadLocalF32`|`0x14` | u16 — local index | `( -- value )` | Push F32 local variable |
+| `LoadLocalF64`|`0x15` | u16 — local index | `( -- value )` | Push F64 local variable |
+| `LoadLocalStr`|`0x16` | u16 — local index | `( -- value )` | Push Str local variable |
 
 Locals are per-call-frame. Accessing an index ≥ frame's local count is an error.
 
 ### 4.3 Arithmetic Operations
 
-All arithmetic ops consume two `Number` values and push one `Number`.
-Passing a non-`Number` type is a `TypeMismatch` error.
+All arithmetic ops are statically typed based on primitive types (I32, I64, F32, F64).
+They consume two values of the matched type and push one value. Passing the wrong type causes a `TypeMismatch` error.
 
-| Opcode | Byte   | Description |
-|--------|--------|-------------|
-| `Add`  | `0x20` | `a + b` |
-| `Sub`  | `0x21` | `a - b` |
-| `Mul`  | `0x22` | `a * b` |
-| `Div`  | `0x23` | `a / b` (DivisionByZero if b = 0.0) |
-| `Mod`  | `0x24` | `a % b` (DivisionByZero if b = 0.0) |
-| `Neg`  | `0x25` | `-a` (unary, pops one value) |
+| Opcode Range | Category | Bytes |
+|--------------|----------|-------|
+| `AddI32` .. `NegI32` | Int32 | `0x20` .. `0x25` |
+| `AddI64` .. `NegI64` | Int64 | `0x26` .. `0x2B` |
+| `AddF32` .. `NegF32` | Float32 | `0x2C` .. `0x31` |
+| `AddF64` .. `NegF64` | Float64 | `0x32` .. `0x37` |
 
 Stack convention: `a` was pushed before `b`.
 `Sub` computes `(second-from-top) - (top)`.
 
 ### 4.4 Comparison Operations
 
-Consume two values, push one `Bool`.
+Consume two values, push one `Bool`. Operands must strictly match the typed operation.
 
-| Opcode         | Byte   | Description |
-|----------------|--------|-------------|
-| `Equal`        | `0x30` | `a == b` (structural equality) |
-| `NotEqual`     | `0x31` | `a != b` |
-| `Less`         | `0x32` | `a < b` (Numbers only) |
-| `LessEqual`    | `0x33` | `a <= b` (Numbers only) |
-| `Greater`      | `0x34` | `a > b` (Numbers only) |
-| `GreaterEqual` | `0x35` | `a >= b` (Numbers only) |
-
-`Equal` and `NotEqual` work on any value type pair.
-Ordered comparisons (`Less`, `LessEqual`, `Greater`, `GreaterEqual`) require both values to be `Number`.
+| Opcode Range | Category | Bytes |
+|--------------|----------|-------|
+| `EqualI32` .. `GreaterEqualI32` | Int32 | `0x38` .. `0x3D` |
+| `EqualI64` .. `GreaterEqualI64` | Int64 | `0x3E` .. `0x43` |
+| `EqualF32` .. `GreaterEqualF32` | Float32 | `0x44` .. `0x49` |
+| `EqualF64` .. `GreaterEqualF64` | Float64 | `0x4A` .. `0x4F` |
+| `EqualStr`, `NotEqualStr` | String | `0x50` .. `0x51` |
+| `AndBool`, `OrBool` | Logical | `0x52` .. `0x53` |
 
 ### 4.5 Control Flow
 
 | Opcode   | Byte   | Operand | Description |
 |----------|--------|---------|-------------|
-| `Jump`   | `0x40` | u32 — target byte offset | Unconditional jump |
-| `JumpIf` | `0x41` | u32 — target byte offset | Jump if top of stack is `true` (`Bool`) |
-| `Call`   | `0x42` | u32 target + u16 local count | Push call frame, jump to target |
-| `Return` | `0x43` | _(none)_ | Pop call frame, resume at return IP |
-
-**`Call` encoding:**
-```
-[0x42] [u32: target offset] [u16: local variable count for new frame]
-```
+| `Jump`   | `0x60` | u32 — target offset | Unconditional jump |
+| `JumpIf` | `0x61` | u32 — target offset | Jump if top of stack is `true` (`Bool`) |
+| `Call`   | `0x62` | u32 target + u16 locals | Push call frame, jump to target |
+| `Return` | `0x63` | _(none)_ | Pop call frame, resume at return IP |
+| `Spawn`  | `0x64` | u32 target | Spawn coroutine/task |
+| `Yield`  | `0x65` | _(none)_ | Yield coroutine execution |
+| `Await`  | `0x66` | _(none)_ | Await async task |
 
 **`Return` at top level** (no active call frame) is treated as `Halt`.
 
-### 4.6 System
+### 4.6 Heap, Objects and FFI
+
+| Opcode | Byte   | Description |
+|--------|--------|-------------|
+| `NewArray` | `0x70` | Allocate new array |
+| `LoadElement` | `0x71` | Load array element |
+| `StoreElement` | `0x72` | Store array element |
+| `NewStruct` | `0x73` | Allocate new struct |
+| `LoadProperty` | `0x74` | Load struct property |
+| `StoreProperty` | `0x75` | Store struct property |
+| `CallNative` | `0x76` | FFI native function call |
+
+### 4.7 Exception Handling
+
+| Opcode | Byte   | Description |
+|--------|--------|-------------|
+| `TryStart` | `0x80` | Push try-catch block |
+| `TryEnd`   | `0x81` | Pop try-catch block |
+| `Throw`    | `0x82` | Throw exception |
+
+### 4.8 System
 
 | Opcode | Byte   | Description |
 |--------|--------|-------------|
 | `Nop`  | `0xF0` | No operation |
+| `Syscall` | `0xF1` | System capability call |
 | `Halt` | `0xFF` | Stop execution |
 
 ---
@@ -185,9 +204,9 @@ These are configurable via `VreConfig`.
 
 ---
 
-## 7. Example: Add Two Numbers
+## 7. Example: Add Two Float64 Numbers
 
-Program: push 2.0, push 3.0, add, halt.
+Program: push 2.0, push 3.0, addf64, halt.
 
 **Constant pool:**
 ```
@@ -200,7 +219,7 @@ count = 2
 ```
 0x01 0x00 0x00   Push #0 (2.0)
 0x01 0x00 0x01   Push #1 (3.0)
-0x20             Add
+0x32             AddF64
 0xFF             Halt
 ```
 

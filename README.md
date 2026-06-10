@@ -13,7 +13,7 @@ This repository intentionally prioritizes:
 ## What VRE Is
 
 VRE is a:
-- bytecode-driven virtual runtime
+- bytecode-driven virtual runtime (with statically typed instructions)
 - platform-agnostic execution engine
 - foundation for Vyauma language and ecosystem
 
@@ -32,8 +32,8 @@ It is NOT:
    - No heavyweight frameworks
 
 2. **Strict Layer Separation**
-   - Bytecode is raw and semantic-free
-   - VM owns semantics and execution
+   - Bytecode is raw, semantic-free, and heavily typed (e.g., `AddI32`, `AddF64`)
+   - VM owns execution without dynamic type dispatch overhead
    - Capabilities are explicit and registered
 
 3. **Deterministic Execution**
@@ -45,6 +45,11 @@ It is NOT:
    - Folder and file structure is locked
    - No restructuring without approval
    - One file implemented at a time
+
+## Recent Highlights
+
+- **Typed Opcodes Engine:** Emits statically typed opcodes like `AddI32` and `LessF64` for faster, type-safe execution, bypassing generic dynamic dispatch in the VM.
+- **Diagnostics:** Full tracking of line and column numbers across tokens and error reports.
 
 ---
 
