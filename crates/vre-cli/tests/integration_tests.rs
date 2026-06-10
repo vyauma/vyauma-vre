@@ -3,16 +3,23 @@ use std::fs;
 use std::path::PathBuf;
 
 fn run_script(script_code: &str, test_name: &str) -> (String, String) {
+    run_script_with_args(script_code, test_name, &[])
+}
+
+fn run_script_with_args(script_code: &str, test_name: &str, args: &[&str]) -> (String, String) {
     let test_dir = std::env::temp_dir().join("vyauma_test");
     fs::create_dir_all(&test_dir).unwrap();
     
     let script_path = test_dir.join(format!("{}.vym", test_name));
     fs::write(&script_path, script_code).unwrap();
     
-    let output = Command::new(env!("CARGO_BIN_EXE_vre"))
-        .arg(script_path)
-        .output()
-        .expect("Failed to execute vre binary");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vre"));
+    cmd.arg(script_path);
+    for arg in args {
+        cmd.arg(arg);
+    }
+    
+    let output = cmd.output().expect("Failed to execute vre binary");
         
     let out = String::from_utf8_lossy(&output.stdout).to_string();
     let err = String::from_utf8_lossy(&output.stderr).to_string();
@@ -143,4 +150,31 @@ fn main():
     assert!(out.contains("Spawned task\n"));
     assert!(out.contains("Worker done\n"));
     assert!(out.contains("Result: 42\n"));
+}
+
+#[test]
+fn test_phase6_capability_denied() {
+    let script = r#"
+fn main():
+    // Creating a directory needs fs.write in our implementation, wait, no, fs_create_dir is fs.write maybe?
+    // Let's test reading a file or opening a file.
+    // We didn't map all PAL to capabilities perfectly, but we mapped `file_open` (fs.read) and `net_connect` (net.connect).
+    // Let's do `net_connect`.
+    let fd = net_connect("127.0.0.1", 8080)
+"#;
+    let (out, err) = run_script_with_args(script, "test_phase6_capability_denied", &[]);
+    assert!(err.contains("capability not granted") || out.contains("capability not granted"));
+}
+
+#[test]
+fn test_phase6_capability_granted() {
+    let script = r#"
+fn main():
+    // The connection might fail since nothing is listening, but the capability should be granted, so we won't get CapabilityNotGranted.
+    let fd = net_connect("127.0.0.1", 8080)
+    ffi_console_print("Executed")
+"#;
+    let (out, err) = run_script_with_args(script, "test_phase6_capability_granted", &["--allow-net"]);
+    assert!(!err.contains("capability not granted"));
+    assert!(out.contains("Executed"));
 }

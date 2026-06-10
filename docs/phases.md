@@ -167,7 +167,7 @@
 ### Event Loop
 - Async Runtime
 
-## Phase 6 — Security & Capability System
+## Phase 6 — Security & Capability System [✅ Mostly Complete]
 ### Permissions
 ### Filesystem
 - Network

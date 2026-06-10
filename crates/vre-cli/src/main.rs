@@ -17,6 +17,11 @@ fn main() {
 
     // Parse flags before the file path
     let check_leaks = raw_args.iter().any(|a| a == "--check-leaks");
+    let allow_read = raw_args.iter().any(|a| a == "--allow-read");
+    let allow_write = raw_args.iter().any(|a| a == "--allow-write");
+    let allow_net = raw_args.iter().any(|a| a == "--allow-net");
+    let allow_all = raw_args.iter().any(|a| a == "--allow-all");
+    
     let args: Vec<&String> = raw_args.iter()
         .filter(|a| !a.starts_with("--"))
         .collect();
@@ -70,13 +75,22 @@ fn main() {
     native::register_ffi(&mut config);
 
     let mut capabilities = CapabilityRegistry::new();
+    
+    // Console I/O is unrestricted by default
     capabilities.grant(Capability::new("io.read"));
     capabilities.grant(Capability::new("io.write"));
-    capabilities.grant(Capability::new("fs.read"));
-    capabilities.grant(Capability::new("fs.write"));
-    capabilities.grant(Capability::new("net.listen"));
-    capabilities.grant(Capability::new("net.accept"));
-    capabilities.grant(Capability::new("net.connect"));
+
+    if allow_all || allow_read {
+        capabilities.grant(Capability::new("fs.read"));
+    }
+    if allow_all || allow_write {
+        capabilities.grant(Capability::new("fs.write"));
+    }
+    if allow_all || allow_net {
+        capabilities.grant(Capability::new("net.listen"));
+        capabilities.grant(Capability::new("net.accept"));
+        capabilities.grant(Capability::new("net.connect"));
+    }
 
     // Run VM
     let mut vm = match VirtualMachine::new(config, instructions, constants, native_imports, capabilities) {
@@ -111,9 +125,15 @@ fn main() {
 fn print_usage(program_name: &str) {
     println!("Vyauma Runtime Engine (VRE)");
     println!("Usage:");
-    println!("  {} <file.vbc>              - Execute compiled bytecode", program_name);
-    println!("  {} <file.vym>              - Compile and execute Vyauma source", program_name);
-    println!("  {} <file.vym> --check-leaks - Run and report heap leaks", program_name);
+    println!("  {} <file.vbc> [options]    - Execute compiled bytecode", program_name);
+    println!("  {} <file.vym> [options]    - Compile and execute Vyauma source", program_name);
+    println!("\nSecurity Options:");
+    println!("  --allow-read               - Allow file system read access");
+    println!("  --allow-write              - Allow file system write access");
+    println!("  --allow-net                - Allow network access");
+    println!("  --allow-all                - Allow all access");
+    println!("\nDebug Options:");
+    println!("  --check-leaks              - Run and report heap leaks");
 }
 
 /// Renders a compiler error with a visual `^` pointer to the exact location.

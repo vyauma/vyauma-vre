@@ -12,13 +12,28 @@ use std::path::Path;
 mod native;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: vre-debug <file.vym>");
+    let raw_args: Vec<String> = env::args().collect();
+    if raw_args.len() < 2 {
+        eprintln!("Usage: vre-debug <file.vym> [options]");
+        eprintln!("Options: --allow-read, --allow-write, --allow-net, --allow-all");
         std::process::exit(1);
     }
 
-    let file_path = &args[1];
+    let allow_read = raw_args.iter().any(|a| a == "--allow-read");
+    let allow_write = raw_args.iter().any(|a| a == "--allow-write");
+    let allow_net = raw_args.iter().any(|a| a == "--allow-net");
+    let allow_all = raw_args.iter().any(|a| a == "--allow-all");
+    
+    let args: Vec<&String> = raw_args.iter()
+        .filter(|a| !a.starts_with("--"))
+        .collect();
+        
+    if args.len() < 2 {
+        eprintln!("Usage: vre-debug <file.vym> [options]");
+        std::process::exit(1);
+    }
+
+    let file_path = args[1];
     let source_code = fs::read_to_string(file_path).expect("Failed to read file");
 
     let base_path = Path::new(file_path).parent();
@@ -30,13 +45,21 @@ fn main() {
     native::register_ffi(&mut config);
 
     let mut capabilities = vre_core::CapabilityRegistry::new();
+    
     capabilities.grant(vre_core::Capability::new("io.read"));
     capabilities.grant(vre_core::Capability::new("io.write"));
-    capabilities.grant(vre_core::Capability::new("fs.read"));
-    capabilities.grant(vre_core::Capability::new("fs.write"));
-    capabilities.grant(vre_core::Capability::new("net.listen"));
-    capabilities.grant(vre_core::Capability::new("net.accept"));
-    capabilities.grant(vre_core::Capability::new("net.connect"));
+
+    if allow_all || allow_read {
+        capabilities.grant(vre_core::Capability::new("fs.read"));
+    }
+    if allow_all || allow_write {
+        capabilities.grant(vre_core::Capability::new("fs.write"));
+    }
+    if allow_all || allow_net {
+        capabilities.grant(vre_core::Capability::new("net.listen"));
+        capabilities.grant(vre_core::Capability::new("net.accept"));
+        capabilities.grant(vre_core::Capability::new("net.connect"));
+    }
 
     let mut vm = VirtualMachine::new(
         config, 
