@@ -673,4 +673,366 @@ pub fn register_ffi(config: &mut VreConfig) {
         };
         std::process::exit(code);
     });
+
+    // --- Phase 4 Utilities ---
+
+    // Regex FFIs
+    config.ffi_functions.insert("ffi_regex_is_match".to_string(), |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_regex_is_match expects 2 arguments".to_string()); }
+        let text = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected text string".to_string()),
+        };
+        let pattern = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected pattern string".to_string()),
+        };
+        let re = regex::Regex::new(&pattern).map_err(|e| format!("Regex Error: {}", e))?;
+        Ok(vre_core::vm::value::Value::Bool(re.is_match(&text)))
+    });
+
+    config.ffi_functions.insert("ffi_regex_replace".to_string(), |_heap, mut args| {
+        if args.len() != 3 { return Err("ffi_regex_replace expects 3 arguments".to_string()); }
+        let rep = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected replacement string".to_string()),
+        };
+        let text = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected text string".to_string()),
+        };
+        let pattern = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected pattern string".to_string()),
+        };
+        let re = regex::Regex::new(&pattern).map_err(|e| format!("Regex Error: {}", e))?;
+        Ok(vre_core::vm::value::Value::String(re.replace_all(&text, rep.as_str()).to_string()))
+    });
+
+    // Date / Time FFIs
+    config.ffi_functions.insert("ffi_date_now_iso8601".to_string(), |_heap, _args| {
+        Ok(vre_core::vm::value::Value::String(chrono::Utc::now().to_rfc3339()))
+    });
+
+    config.ffi_functions.insert("ffi_date_format".to_string(), |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_date_format expects 2 arguments".to_string()); }
+        let format_str = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected format string".to_string()),
+        };
+        let ts_ms = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Float64(n) => n as i64,
+            _ => return Err("Expected timestamp number".to_string()),
+        };
+        let dt = chrono::DateTime::from_timestamp_millis(ts_ms)
+            .ok_or_else(|| "Invalid timestamp".to_string())?;
+        Ok(vre_core::vm::value::Value::String(dt.format(&format_str).to_string()))
+    });
+
+    // UUID
+    config.ffi_functions.insert("ffi_uuid_v4".to_string(), |_heap, _args| {
+        Ok(vre_core::vm::value::Value::String(uuid::Uuid::new_v4().to_string()))
+    });
+
+    // --- Phase 4 Serialization (YAML, TOML) ---
+
+    // YAML Parser
+    config.ffi_functions.insert("ffi_yaml_parse".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_yaml_parse expects 1 argument".to_string()); }
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string".to_string()),
+        };
+        // Parse YAML to serde_json::Value to reuse the json logic
+        let json_val: serde_json::Value = serde_yaml::from_str(&s).map_err(|e| format!("YAML Parse Error: {}", e))?;
+        
+        fn json_to_vyauma(heap: &mut vre_core::vm::memory::Heap, json: &serde_json::Value) -> Result<vre_core::vm::value::Value, String> {
+            match json {
+                serde_json::Value::Null => Ok(vre_core::vm::value::Value::Null),
+                serde_json::Value::Bool(b) => Ok(vre_core::vm::value::Value::Bool(*b)),
+                serde_json::Value::Number(n) => Ok(vre_core::vm::value::Value::Float64(n.as_f64().unwrap_or(0.0))),
+                serde_json::Value::String(s) => Ok(vre_core::vm::value::Value::String(s.clone())),
+                serde_json::Value::Array(arr) => {
+                    let mut v_arr = Vec::new();
+                    for item in arr { v_arr.push(json_to_vyauma(heap, item)?); }
+                    let obj = vre_core::vm::memory::HeapObject::Array(v_arr);
+                    Ok(vre_core::vm::value::Value::Reference(heap.allocate(obj)))
+                }
+                serde_json::Value::Object(obj) => {
+                    let mut v_map = std::collections::HashMap::new();
+                    for (k, v) in obj { v_map.insert(k.clone(), json_to_vyauma(heap, v)?); }
+                    let h_obj = vre_core::vm::memory::HeapObject::Struct(v_map);
+                    Ok(vre_core::vm::value::Value::Reference(heap.allocate(h_obj)))
+                }
+            }
+        }
+        json_to_vyauma(heap, &json_val)
+    });
+
+    config.ffi_functions.insert("ffi_yaml_stringify".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_yaml_stringify expects 1 argument".to_string()); }
+        let root = args.pop().unwrap();
+        
+        fn vyauma_to_json(heap: &vre_core::vm::memory::Heap, value: &vre_core::vm::value::Value) -> Result<serde_json::Value, String> {
+            match value {
+                vre_core::vm::value::Value::Null => Ok(serde_json::Value::Null),
+                vre_core::vm::value::Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
+                vre_core::vm::value::Value::String(s) => Ok(serde_json::Value::String(s.clone())),
+                vre_core::vm::value::Value::Float64(n) => {
+                    if let Some(num) = serde_json::Number::from_f64(*n) { Ok(serde_json::Value::Number(num)) } else { Err("Invalid number".to_string()) }
+                }
+                vre_core::vm::value::Value::Reference(id) => {
+                    let obj = heap.get(*id).map_err(|_| "Invalid heap reference".to_string())?;
+                    match obj {
+                        vre_core::vm::memory::HeapObject::Array(arr) => {
+                            let mut j_arr = Vec::new();
+                            for item in arr { j_arr.push(vyauma_to_json(heap, item)?); }
+                            Ok(serde_json::Value::Array(j_arr))
+                        }
+                        vre_core::vm::memory::HeapObject::Struct(map) => {
+                            let mut j_map = serde_json::Map::new();
+                            for (k, v) in map { j_map.insert(k.clone(), vyauma_to_json(heap, v)?); }
+                            Ok(serde_json::Value::Object(j_map))
+                        }
+                        vre_core::vm::memory::HeapObject::String(s) => Ok(serde_json::Value::String(s.clone())),
+                        _ => Err("Unsupported heap object".to_string()),
+                    }
+                }
+                _ => Err("Unsupported Vyauma value".to_string()),
+            }
+        }
+        let json_val = vyauma_to_json(heap, &root)?;
+        let s = serde_yaml::to_string(&json_val).map_err(|e| format!("YAML Stringify Error: {}", e))?;
+        Ok(vre_core::vm::value::Value::String(s))
+    });
+
+    config.ffi_functions.insert("ffi_toml_parse".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_toml_parse expects 1 argument".to_string()); }
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string".to_string()),
+        };
+        // TOML -> JSON -> Vyauma (to reuse logic)
+        let json_val: serde_json::Value = toml::from_str(&s).map_err(|e| format!("TOML Parse Error: {}", e))?;
+        
+        fn json_to_vyauma(heap: &mut vre_core::vm::memory::Heap, json: &serde_json::Value) -> Result<vre_core::vm::value::Value, String> {
+            match json {
+                serde_json::Value::Null => Ok(vre_core::vm::value::Value::Null),
+                serde_json::Value::Bool(b) => Ok(vre_core::vm::value::Value::Bool(*b)),
+                serde_json::Value::Number(n) => Ok(vre_core::vm::value::Value::Float64(n.as_f64().unwrap_or(0.0))),
+                serde_json::Value::String(s) => Ok(vre_core::vm::value::Value::String(s.clone())),
+                serde_json::Value::Array(arr) => {
+                    let mut v_arr = Vec::new();
+                    for item in arr { v_arr.push(json_to_vyauma(heap, item)?); }
+                    let obj = vre_core::vm::memory::HeapObject::Array(v_arr);
+                    Ok(vre_core::vm::value::Value::Reference(heap.allocate(obj)))
+                }
+                serde_json::Value::Object(obj) => {
+                    let mut v_map = std::collections::HashMap::new();
+                    for (k, v) in obj { v_map.insert(k.clone(), json_to_vyauma(heap, v)?); }
+                    let h_obj = vre_core::vm::memory::HeapObject::Struct(v_map);
+                    Ok(vre_core::vm::value::Value::Reference(heap.allocate(h_obj)))
+                }
+            }
+        }
+        json_to_vyauma(heap, &json_val)
+    });
+
+    config.ffi_functions.insert("ffi_toml_stringify".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_toml_stringify expects 1 argument".to_string()); }
+        let root = args.pop().unwrap();
+        
+        fn vyauma_to_json(heap: &vre_core::vm::memory::Heap, value: &vre_core::vm::value::Value) -> Result<serde_json::Value, String> {
+            match value {
+                vre_core::vm::value::Value::Null => Ok(serde_json::Value::Null),
+                vre_core::vm::value::Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
+                vre_core::vm::value::Value::String(s) => Ok(serde_json::Value::String(s.clone())),
+                vre_core::vm::value::Value::Float64(n) => {
+                    if let Some(num) = serde_json::Number::from_f64(*n) { Ok(serde_json::Value::Number(num)) } else { Err("Invalid number".to_string()) }
+                }
+                vre_core::vm::value::Value::Reference(id) => {
+                    let obj = heap.get(*id).map_err(|_| "Invalid heap reference".to_string())?;
+                    match obj {
+                        vre_core::vm::memory::HeapObject::Array(arr) => {
+                            let mut j_arr = Vec::new();
+                            for item in arr { j_arr.push(vyauma_to_json(heap, item)?); }
+                            Ok(serde_json::Value::Array(j_arr))
+                        }
+                        vre_core::vm::memory::HeapObject::Struct(map) => {
+                            let mut j_map = serde_json::Map::new();
+                            for (k, v) in map { j_map.insert(k.clone(), vyauma_to_json(heap, v)?); }
+                            Ok(serde_json::Value::Object(j_map))
+                        }
+                        vre_core::vm::memory::HeapObject::String(s) => Ok(serde_json::Value::String(s.clone())),
+                        _ => Err("Unsupported heap object".to_string()),
+                    }
+                }
+                _ => Err("Unsupported Vyauma value".to_string()),
+            }
+        }
+        let json_val = vyauma_to_json(heap, &root)?;
+        let s = toml::to_string(&json_val).map_err(|e| format!("TOML Stringify Error: {}", e))?;
+        Ok(vre_core::vm::value::Value::String(s))
+    });
+
+    // --- Phase 4 File APIs (Directory) ---
+
+    config.ffi_functions.insert("ffi_fs_create_dir".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_fs_create_dir expects 1 argument".to_string()); }
+        let path = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected path string".to_string()),
+        };
+        let success = vre_core::pal::get_pal().create_dir_all(std::path::Path::new(&path)).is_ok();
+        Ok(vre_core::vm::value::Value::Bool(success))
+    });
+
+    config.ffi_functions.insert("ffi_fs_is_dir".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_fs_is_dir expects 1 argument".to_string()); }
+        let path = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected path string".to_string()),
+        };
+        Ok(vre_core::vm::value::Value::Bool(vre_core::pal::get_pal().is_dir(std::path::Path::new(&path))))
+    });
+
+    config.ffi_functions.insert("ffi_fs_read_dir".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_fs_read_dir expects 1 argument".to_string()); }
+        let path = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected path string".to_string()),
+        };
+        match vre_core::pal::get_pal().read_dir(std::path::Path::new(&path)) {
+            Ok(entries) => {
+                let mut v_arr = Vec::new();
+                for e in entries {
+                    v_arr.push(vre_core::vm::value::Value::String(e.to_string_lossy().to_string()));
+                }
+                let obj = vre_core::vm::memory::HeapObject::Array(v_arr);
+                Ok(vre_core::vm::value::Value::Reference(heap.allocate(obj)))
+            }
+            Err(e) => Err(format!("read_dir error: {}", e)),
+        }
+    });
+
+    // --- Phase 4 Networking (HTTP) ---
+
+    config.ffi_functions.insert("ffi_http_get".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_http_get expects 1 argument".to_string()); }
+        let url = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected url string".to_string()),
+        };
+        
+        let empty_headers = std::collections::HashMap::new();
+        match vre_core::pal::get_pal().http_get(&url, &empty_headers) {
+            Ok(res) => {
+                let mut v_map = std::collections::HashMap::new();
+                v_map.insert("status".to_string(), vre_core::vm::value::Value::Float64(res.status as f64));
+                v_map.insert("body".to_string(), vre_core::vm::value::Value::String(res.body));
+                
+                let h_obj = vre_core::vm::memory::HeapObject::Struct(v_map);
+                Ok(vre_core::vm::value::Value::Reference(heap.allocate(h_obj)))
+            }
+            Err(e) => Err(format!("http_get error: {}", e)),
+        }
+    });
+
+    config.ffi_functions.insert("ffi_http_post".to_string(), |heap, mut args| {
+        if args.len() != 2 { return Err("ffi_http_post expects 2 arguments (url, body_str)".to_string()); }
+        let body = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected body string".to_string()),
+        };
+        let url = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected url string".to_string()),
+        };
+        
+        let empty_headers = std::collections::HashMap::new();
+        match vre_core::pal::get_pal().http_post(&url, &empty_headers, &body) {
+            Ok(res) => {
+                let mut v_map = std::collections::HashMap::new();
+                v_map.insert("status".to_string(), vre_core::vm::value::Value::Float64(res.status as f64));
+                v_map.insert("body".to_string(), vre_core::vm::value::Value::String(res.body));
+                
+                let h_obj = vre_core::vm::memory::HeapObject::Struct(v_map);
+                Ok(vre_core::vm::value::Value::Reference(heap.allocate(h_obj)))
+            }
+            Err(e) => Err(format!("http_post error: {}", e)),
+        }
+    });
+
+    // --- Phase 4 Networking (WebSocket) ---
+
+    config.ffi_functions.insert("ffi_ws_connect".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_ws_connect expects 1 argument".to_string()); }
+        let url = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected url string".to_string()),
+        };
+        match vre_core::pal::get_pal().ws_connect(&url) {
+            Ok(handle) => Ok(vre_core::vm::value::Value::Float64(handle as f64)),
+            Err(e) => Err(format!("ws_connect error: {}", e)),
+        }
+    });
+
+    config.ffi_functions.insert("ffi_ws_send".to_string(), |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_ws_send expects 2 arguments".to_string()); }
+        let msg = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string message".to_string()),
+        };
+        let handle = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Float64(n) => n as usize,
+            _ => return Err("Expected handle number".to_string()),
+        };
+        
+        match vre_core::pal::get_pal().ws_send(handle, vre_core::pal::WsMessage::Text(msg)) {
+            Ok(_) => Ok(vre_core::vm::value::Value::Bool(true)),
+            Err(e) => Err(format!("ws_send error: {}", e)),
+        }
+    });
+
+    config.ffi_functions.insert("ffi_ws_recv".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_ws_recv expects 1 argument".to_string()); }
+        let handle = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Float64(n) => n as usize,
+            _ => return Err("Expected handle number".to_string()),
+        };
+        
+        match vre_core::pal::get_pal().ws_recv(handle) {
+            Ok(vre_core::pal::WsMessage::Text(s)) => Ok(vre_core::vm::value::Value::String(s)),
+            Ok(vre_core::pal::WsMessage::Binary(_)) => Ok(vre_core::vm::value::Value::String("[Binary Data]".to_string())),
+            Ok(vre_core::pal::WsMessage::Close) => Ok(vre_core::vm::value::Value::Null),
+            Err(e) => Err(format!("ws_recv error: {}", e)),
+        }
+    });
+
+    config.ffi_functions.insert("ffi_ws_close".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_ws_close expects 1 argument".to_string()); }
+        let handle = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Float64(n) => n as usize,
+            _ => return Err("Expected handle number".to_string()),
+        };
+        
+        match vre_core::pal::get_pal().ws_close(handle) {
+            Ok(_) => Ok(vre_core::vm::value::Value::Bool(true)),
+            Err(e) => Err(format!("ws_close error: {}", e)),
+        }
+    });
+
+    // --- Phase 4 Process / Timers ---
+
+    config.ffi_functions.insert("ffi_sleep".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_sleep expects 1 argument".to_string()); }
+        let ms = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Float64(n) => n as u64,
+            _ => return Err("Expected ms number".to_string()),
+        };
+        vre_core::pal::get_pal().sleep_ms(ms);
+        Ok(vre_core::vm::value::Value::Null)
+    });
+
 }
+

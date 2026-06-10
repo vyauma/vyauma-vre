@@ -17,3 +17,8 @@ path = "src/bin/vre-debug.rs"
 vre-core = { path = "../vre-core" }
 vre-compiler = { path = "../vre-compiler" }
 serde_json = "1.0"
+regex = "1.10"
+chrono = "0.4"
+uuid = { version = "1.7", features = ["v4"] }
+serde_yaml = "0.9"
+toml = "0.8"
