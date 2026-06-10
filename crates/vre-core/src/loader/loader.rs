@@ -79,7 +79,6 @@ impl BytecodeLoader {
         })
     }
 
-    /// Read a constant value (minimal runtime types only)
     fn read_constant(bytes: &[u8], cursor: &mut usize) -> VreResult<Value> {
         let tag = Self::read_u8(bytes, cursor)?;
 
@@ -90,12 +89,34 @@ impl BytecodeLoader {
                 Ok(Value::Bool(b != 0))
             }
             0x02 => {
+                let n = Self::read_u32(bytes, cursor)? as i32;
+                Ok(Value::Int32(n))
+            }
+            0x03 => {
+                // Read 8 bytes for i64
+                let mut buf = [0u8; 8];
+                for i in 0..8 { buf[i] = Self::read_u8(bytes, cursor)?; }
+                Ok(Value::Int64(i64::from_be_bytes(buf)))
+            }
+            0x04 => {
+                let n = f32::from_bits(Self::read_u32(bytes, cursor)?);
+                Ok(Value::Float32(n))
+            }
+            0x05 => {
                 let n = Self::read_f64(bytes, cursor)?;
-                Ok(Value::Number(n))
+                Ok(Value::Float64(n))
+            }
+            0x06 => {
+                let len = Self::read_u32(bytes, cursor)? as usize;
+                let mut s = String::new();
+                for _ in 0..len {
+                    s.push(Self::read_u8(bytes, cursor)? as char);
+                }
+                Ok(Value::String(s))
             }
             0xFF => {
                 let id = Self::read_u32(bytes, cursor)?;
-                Ok(Value::Ref(id))
+                Ok(Value::Reference(id as usize))
             }
             _ => Err(VreError::MalformedBytecode),
         }

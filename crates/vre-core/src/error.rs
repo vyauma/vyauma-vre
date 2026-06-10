@@ -15,6 +15,13 @@ pub enum VreError {
     MalformedBytecode,
     BytecodeTooShort,
 
+    // Categorized Exceptions
+    RuntimeException(String),
+    TypeException(String),
+    MemoryException(String),
+    IOException(String),
+    InternalException(String),
+
     // VM execution errors
     StackOverflow,
     StackUnderflow,
@@ -86,6 +93,17 @@ impl fmt::Display for VreError {
                 write!(f, "type mismatch"),
             VreError::RuntimeFault =>
                 write!(f, "runtime fault"),
+
+            VreError::RuntimeException(msg) =>
+                write!(f, "runtime exception: {}", msg),
+            VreError::TypeException(msg) =>
+                write!(f, "type exception: {}", msg),
+            VreError::MemoryException(msg) =>
+                write!(f, "memory exception: {}", msg),
+            VreError::IOException(msg) =>
+                write!(f, "io exception: {}", msg),
+            VreError::InternalException(msg) =>
+                write!(f, "internal exception: {}", msg),
 
             VreError::IoError(msg) =>
                 write!(f, "io error: {}", msg),

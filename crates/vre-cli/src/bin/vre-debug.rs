@@ -22,7 +22,7 @@ fn main() {
     let source_code = fs::read_to_string(file_path).expect("Failed to read file");
 
     let base_path = Path::new(file_path).parent();
-    let bytecode = compile(&source_code, base_path).expect("Compilation failed");
+    let bytecode = compile(&source_code, file_path, base_path).expect("Compilation failed");
 
     let mut config = VreConfig::default();
     
@@ -170,7 +170,7 @@ fn disassemble(vm: &VirtualMachine, ip: usize) -> (String, usize) {
     let mut next_ip = ip + 1;
 
     match opcode {
-        OpCode::Push | OpCode::LoadLocal | OpCode::StoreLocal | OpCode::CallNative => {
+        OpCode::Push | OpCode::LoadLocal | OpCode::LoadLocalI32 | OpCode::LoadLocalI64 | OpCode::LoadLocalF32 | OpCode::LoadLocalF64 | OpCode::LoadLocalStr | OpCode::StoreLocal | OpCode::CallNative => {
             if next_ip + 1 < insts.len() {
                 let operand = ((insts[next_ip] as u16) << 8) | (insts[next_ip + 1] as u16);
                 string.push_str(&format!(" {}", operand));

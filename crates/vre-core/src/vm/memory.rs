@@ -33,6 +33,10 @@ impl Globals {
         self.values[index] = value;
         Ok(())
     }
+
+    pub fn values(&self) -> &[Value] {
+        &self.values
+    }
 }
 
 /// Local variables for a single call frame
@@ -103,14 +107,21 @@ pub enum HeapObject {
     Array(Vec<Value>),
     String(String),
     Struct(HashMap<String, Value>),
+    Function(usize), // instruction pointer
+}
+
+#[derive(Debug, Clone)]
+pub struct GcObject {
+    pub data: HeapObject,
 }
 
 /// Dynamic Memory Heap
 #[derive(Debug)]
 pub struct Heap {
-    pub objects: Vec<Option<HeapObject>>,
-    pub free_list: Vec<u32>,
+    pub objects: Vec<Option<GcObject>>,
+    pub free_list: Vec<usize>,
     pub live_objects: usize,
+    pub total_allocations: usize,
 }
 
 impl Heap {
@@ -119,32 +130,49 @@ impl Heap {
             objects: Vec::new(),
             free_list: Vec::new(),
             live_objects: 0,
+            total_allocations: 0,
         }
     }
 
-    pub fn allocate(&mut self, obj: HeapObject) -> u32 {
+    pub fn allocate(&mut self, obj: HeapObject) -> usize {
         self.live_objects += 1;
+        self.total_allocations += 1;
+        let gc_obj = GcObject { data: obj };
         if let Some(id) = self.free_list.pop() {
-            self.objects[id as usize] = Some(obj);
+            self.objects[id] = Some(gc_obj);
             id
         } else {
-            let id = self.objects.len() as u32;
-            self.objects.push(Some(obj));
+            let id = self.objects.len();
+            self.objects.push(Some(gc_obj));
             id
         }
     }
 
-    pub fn get(&self, id: u32) -> VreResult<&HeapObject> {
+    pub fn deallocate(&mut self, id: usize) -> VreResult<()> {
+        if let Some(slot) = self.objects.get_mut(id) {
+            if slot.is_some() {
+                *slot = None;
+                self.free_list.push(id);
+                self.live_objects -= 1;
+                return Ok(());
+            }
+        }
+        Err(VreError::RuntimeFault)
+    }
+
+    pub fn get(&self, id: usize) -> VreResult<&HeapObject> {
         self.objects
-            .get(id as usize)
+            .get(id)
             .and_then(|opt| opt.as_ref())
+            .map(|gc_obj| &gc_obj.data)
             .ok_or(VreError::RuntimeFault)
     }
 
-    pub fn get_mut(&mut self, id: u32) -> VreResult<&mut HeapObject> {
+    pub fn get_mut(&mut self, id: usize) -> VreResult<&mut HeapObject> {
         self.objects
-            .get_mut(id as usize)
+            .get_mut(id)
             .and_then(|opt| opt.as_mut())
+            .map(|gc_obj| &mut gc_obj.data)
             .ok_or(VreError::RuntimeFault)
     }
 
@@ -152,9 +180,8 @@ impl Heap {
         for (i, opt_obj) in self.objects.iter_mut().enumerate() {
             if opt_obj.is_some() {
                 if i >= marked.len() || !marked[i] {
-                    // Unreachable object, reclaim
                     *opt_obj = None;
-                    self.free_list.push(i as u32);
+                    self.free_list.push(i);
                     self.live_objects -= 1;
                 }
             }

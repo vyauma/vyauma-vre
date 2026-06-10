@@ -7,13 +7,17 @@
 //! (VM, memory, execution model) are not exposed prematurely.
 
 pub mod error;
-pub mod config;
 pub mod bytecode;
+pub mod config;
 pub mod vm;
 pub mod loader;
 pub mod capability;
 pub mod crypto;
 pub mod jit;
+pub mod scheduler;
+pub mod metrics;
+pub mod plugin;
+pub mod pal;
 
 // Public error & configuration types
 pub use error::{VreError, VreResult};

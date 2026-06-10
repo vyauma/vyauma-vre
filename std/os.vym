@@ -1,0 +1,3 @@
+fn os_name() -> String { return ffi_os_name(); }
+fn env_get(key: String) -> String { return ffi_env_get(key); }
+fn time_now_ms() -> Float64 { return ffi_time_now_ms(); }

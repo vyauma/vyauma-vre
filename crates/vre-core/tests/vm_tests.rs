@@ -47,19 +47,32 @@ fn build_bytecode_binary(constants: Vec<Value>, instructions: Vec<u8>, entry_poi
                 out.push(0x01);
                 out.push(if b { 1 } else { 0 });
             }
-            Value::Number(n) => {
+            Value::Int32(n) => {
                 out.push(0x02);
                 out.extend_from_slice(&n.to_be_bytes());
             }
-            Value::Ref(r) => {
-                out.push(0xFF);
-                out.extend_from_slice(&r.to_be_bytes());
+            Value::Int64(n) => {
+                out.push(0x03);
+                out.extend_from_slice(&n.to_be_bytes());
+            }
+            Value::Float32(n) => {
+                out.push(0x04);
+                out.extend_from_slice(&n.to_be_bytes());
+            }
+            Value::Float64(n) => {
+                out.push(0x05);
+                out.extend_from_slice(&n.to_be_bytes());
             }
             Value::String(s) => {
-                out.push(0x03);
+                out.push(0x06);
                 out.extend_from_slice(&(s.len() as u32).to_be_bytes());
                 out.extend_from_slice(s.as_bytes());
             }
+            Value::Reference(r) => {
+                out.push(0xFF);
+                out.extend_from_slice(&(r as u32).to_be_bytes());
+            }
+            _ => panic!("Unsupported constant type in tests"),
         }
     }
     // Instructions length
@@ -70,7 +83,7 @@ fn build_bytecode_binary(constants: Vec<Value>, instructions: Vec<u8>, entry_poi
 
 #[test]
 fn test_stack_push_pop_dup() {
-    let constants = vec![Value::Number(42.0), Value::Number(100.0)];
+    let constants = vec![Value::Float64(42.0), Value::Float64(100.0)];
     let instructions = vec![
         OpCode::Push as u8, 0, 0, // push constant 0 (42.0)
         OpCode::Push as u8, 0, 1, // push constant 1 (100.0)
@@ -80,77 +93,77 @@ fn test_stack_push_pop_dup() {
     ];
 
     let result = run_vm(constants, instructions).unwrap();
-    assert_eq!(result, Value::Number(42.0));
+    assert_eq!(result, Value::Float64(42.0));
 }
 
 #[test]
 fn test_arithmetic() {
     // 10 + 5 = 15
-    let constants = vec![Value::Number(10.0), Value::Number(5.0)];
+    let constants = vec![Value::Float64(10.0), Value::Float64(5.0)];
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::Add as u8,
+        OpCode::AddF64 as u8,
         OpCode::Halt as u8,
     ];
-    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Number(15.0));
+    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Float64(15.0));
 
     // 10 - 5 = 5
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::Sub as u8,
+        OpCode::SubF64 as u8,
         OpCode::Halt as u8,
     ];
-    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Number(5.0));
+    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Float64(5.0));
 
     // 10 * 5 = 50
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::Mul as u8,
+        OpCode::MulF64 as u8,
         OpCode::Halt as u8,
     ];
-    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Number(50.0));
+    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Float64(50.0));
 
     // 10 / 5 = 2
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::Div as u8,
+        OpCode::DivF64 as u8,
         OpCode::Halt as u8,
     ];
-    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Number(2.0));
+    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Float64(2.0));
 
     // 10 % 3 = 1
-    let constants = vec![Value::Number(10.0), Value::Number(3.0)];
+    let constants = vec![Value::Float64(10.0), Value::Float64(3.0)];
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::Mod as u8,
+        OpCode::ModF64 as u8,
         OpCode::Halt as u8,
     ];
-    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Number(1.0));
+    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Float64(1.0));
 
     // -10
-    let constants = vec![Value::Number(10.0)];
+    let constants = vec![Value::Float64(10.0)];
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
-        OpCode::Neg as u8,
+        OpCode::NegF64 as u8,
         OpCode::Halt as u8,
     ];
-    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Number(-10.0));
+    assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Float64(-10.0));
 }
 
 #[test]
 fn test_comparisons() {
-    let constants = vec![Value::Number(10.0), Value::Number(5.0)];
+    let constants = vec![Value::Float64(10.0), Value::Float64(5.0)];
     
     // 10 == 5 -> false
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::Equal as u8,
+        OpCode::EqualF64 as u8,
         OpCode::Halt as u8,
     ];
     assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Bool(false));
@@ -159,7 +172,7 @@ fn test_comparisons() {
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::NotEqual as u8,
+        OpCode::NotEqualF64 as u8,
         OpCode::Halt as u8,
     ];
     assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Bool(true));
@@ -168,17 +181,17 @@ fn test_comparisons() {
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::Less as u8,
+        OpCode::LessF64 as u8,
         OpCode::Halt as u8,
     ];
     assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Bool(false));
 
     // 10 <= 10 -> true
-    let constants = vec![Value::Number(10.0), Value::Number(10.0)];
+    let constants = vec![Value::Float64(10.0), Value::Float64(10.0)];
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::LessEqual as u8,
+        OpCode::LessEqualF64 as u8,
         OpCode::Halt as u8,
     ];
     assert_eq!(run_vm(constants.clone(), instructions).unwrap(), Value::Bool(true));
@@ -186,7 +199,7 @@ fn test_comparisons() {
 
 #[test]
 fn test_unconditional_jump() {
-    let constants = vec![Value::Number(99.0)];
+    let constants = vec![Value::Float64(99.0)];
     let instructions = vec![
         OpCode::Jump as u8, 0, 0, 0, 8, // Jump past push
         OpCode::Push as u8, 0, 0,
@@ -202,7 +215,7 @@ fn test_unconditional_jump() {
 
 #[test]
 fn test_conditional_jump() {
-    let constants = vec![Value::Bool(true), Value::Number(42.0)];
+    let constants = vec![Value::Bool(true), Value::Float64(42.0)];
     let instructions = vec![
         OpCode::Push as u8, 0, 0,       // push true
         OpCode::JumpIf as u8, 0, 0, 0, 12, // jump to offset 12 (push 42.0)
@@ -213,12 +226,12 @@ fn test_conditional_jump() {
     ];
 
     let result = run_vm(constants, instructions).unwrap();
-    assert_eq!(result, Value::Number(42.0));
+    assert_eq!(result, Value::Float64(42.0));
 }
 
 #[test]
 fn test_function_call_and_return() {
-    let constants = vec![Value::Number(10.0), Value::Number(20.0)];
+    let constants = vec![Value::Float64(10.0), Value::Float64(20.0)];
     // Main calls function at offset 8.
     // Function loads locals, adds them, and returns.
     let instructions = vec![
@@ -233,21 +246,21 @@ fn test_function_call_and_return() {
         OpCode::StoreLocal as u8, 0, 1,       // store in local 1
         OpCode::LoadLocal as u8, 0, 0,        // load local 0
         OpCode::LoadLocal as u8, 0, 1,        // load local 1
-        OpCode::Add as u8,                    // add
+        OpCode::AddF64 as u8,                    // add
         OpCode::Return as u8,
     ];
 
     let result = run_vm(constants, instructions).unwrap();
-    assert_eq!(result, Value::Number(30.0));
+    assert_eq!(result, Value::Float64(30.0));
 }
 
 #[test]
 fn test_division_by_zero() {
-    let constants = vec![Value::Number(5.0), Value::Number(0.0)];
+    let constants = vec![Value::Float64(5.0), Value::Float64(0.0)];
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 1,
-        OpCode::Div as u8,
+        OpCode::DivF64 as u8,
         OpCode::Halt as u8,
     ];
 
@@ -263,7 +276,7 @@ fn test_stack_overflow() {
         max_call_depth: 256,
         ffi_functions: std::collections::HashMap::new(),
     };
-    let constants = vec![Value::Number(1.0)];
+    let constants = vec![Value::Float64(1.0)];
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Push as u8, 0, 0,
@@ -294,20 +307,20 @@ fn test_call_depth_overflow() {
 
 #[test]
 fn test_bytecode_loader_validation() {
-    let constants = vec![Value::Number(77.0)];
+    let constants = vec![Value::Float64(77.0)];
     let instructions = vec![OpCode::Push as u8, 0, 0, OpCode::Halt as u8];
     let binary = build_bytecode_binary(constants, instructions, 0);
 
     let loaded = BytecodeLoader::load(&binary).unwrap();
     assert_eq!(loaded.entry_point, 0);
     assert_eq!(loaded.constants.len(), 1);
-    assert_eq!(loaded.constants[0], Value::Number(77.0));
+    assert_eq!(loaded.constants[0], Value::Float64(77.0));
     assert_eq!(loaded.instructions.len(), 4);
 }
 
 #[test]
 fn test_syscall_print_capability_enforced() {
-    let constants = vec![Value::Number(88.0)];
+    let constants = vec![Value::Float64(88.0)];
     let instructions = vec![
         OpCode::Push as u8, 0, 0,
         OpCode::Syscall as u8, 0x01, // print
@@ -325,4 +338,23 @@ fn test_syscall_print_capability_enforced() {
     let mut vm = VirtualMachine::new(VreConfig::default(), instructions, constants, vec![], caps_denied).unwrap();
     let err = vm.execute().unwrap_err();
     assert!(matches!(err, VreError::CapabilityNotGranted));
+}
+
+#[test]
+fn test_coroutines() {
+    let constants = vec![Value::Int64(10), Value::Int64(20)];
+    let instructions = vec![
+        OpCode::Spawn as u8, 0, 0, 0, 11,
+        OpCode::Pop as u8,
+        OpCode::Push as u8, 0, 0,
+        OpCode::Yield as u8,
+        OpCode::Halt as u8,
+        
+        OpCode::Push as u8, 0, 1,
+        OpCode::Yield as u8,
+        OpCode::Return as u8,
+    ];
+
+    let result = run_vm(constants, instructions).unwrap();
+    assert_eq!(result, Value::Int64(10));
 }

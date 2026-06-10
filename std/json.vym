@@ -1,0 +1,2 @@
+fn json_parse(str: String) -> Any { return ffi_json_parse(str); }
+fn json_stringify(obj: Any) -> String { return ffi_json_stringify(obj); }

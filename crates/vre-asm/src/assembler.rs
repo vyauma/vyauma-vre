@@ -180,7 +180,7 @@ impl Assembler {
                 OpCode::Pop | OpCode::Dup => {}
 
                 // Locals and Properties
-                OpCode::LoadLocal | OpCode::StoreLocal | OpCode::LoadProperty | OpCode::StoreProperty => {
+                OpCode::LoadLocal | OpCode::LoadLocalI32 | OpCode::LoadLocalI64 | OpCode::LoadLocalF32 | OpCode::LoadLocalF64 | OpCode::LoadLocalStr | OpCode::StoreLocal | OpCode::LoadProperty | OpCode::StoreProperty => {
                     if instr.operands.len() != 1 {
                         return Err(format!("{:?} requires exactly 1 operand at offset {}", instr.opcode, offset));
                     }
@@ -189,9 +189,15 @@ impl Assembler {
                 }
 
                 // Arithmetic & Comparison
-                OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div |
-                OpCode::Mod | OpCode::Neg | OpCode::Equal | OpCode::NotEqual |
-                OpCode::Less | OpCode::LessEqual | OpCode::Greater | OpCode::GreaterEqual |
+                OpCode::AddI32 | OpCode::SubI32 | OpCode::MulI32 | OpCode::DivI32 | OpCode::ModI32 | OpCode::NegI32 |
+                OpCode::AddI64 | OpCode::SubI64 | OpCode::MulI64 | OpCode::DivI64 | OpCode::ModI64 | OpCode::NegI64 |
+                OpCode::AddF32 | OpCode::SubF32 | OpCode::MulF32 | OpCode::DivF32 | OpCode::ModF32 | OpCode::NegF32 |
+                OpCode::AddF64 | OpCode::SubF64 | OpCode::MulF64 | OpCode::DivF64 | OpCode::ModF64 | OpCode::NegF64 |
+                OpCode::EqualI32 | OpCode::NotEqualI32 | OpCode::LessI32 | OpCode::LessEqualI32 | OpCode::GreaterI32 | OpCode::GreaterEqualI32 |
+                OpCode::EqualI64 | OpCode::NotEqualI64 | OpCode::LessI64 | OpCode::LessEqualI64 | OpCode::GreaterI64 | OpCode::GreaterEqualI64 |
+                OpCode::EqualF32 | OpCode::NotEqualF32 | OpCode::LessF32 | OpCode::LessEqualF32 | OpCode::GreaterF32 | OpCode::GreaterEqualF32 |
+                OpCode::EqualF64 | OpCode::NotEqualF64 | OpCode::LessF64 | OpCode::LessEqualF64 | OpCode::GreaterF64 | OpCode::GreaterEqualF64 |
+                OpCode::EqualStr | OpCode::NotEqualStr |
                 OpCode::NewArray | OpCode::LoadElement | OpCode::StoreElement | OpCode::NewStruct => {}
 
                 // Jumps
@@ -245,6 +251,17 @@ impl Assembler {
                     let id = parse_u8_operand(&instr.operands[0])?;
                     instr_bytes.push(id);
                 }
+
+                OpCode::Spawn => {
+                    if instr.operands.len() != 1 {
+                        return Err(format!("spawn requires exactly 1 operand at offset {}", offset));
+                    }
+                    let target_offset = self.resolve_label_or_u32(&instr.operands[0])?;
+                    instr_bytes.extend_from_slice(&(target_offset as u32).to_be_bytes());
+                }
+
+                OpCode::Yield | OpCode::Await => {}
+                OpCode::AndBool | OpCode::OrBool => {}
             }
         }
 
@@ -307,19 +324,21 @@ fn parse_opcode(name: &str) -> Option<OpCode> {
         "pop" => Some(OpCode::Pop),
         "dup" => Some(OpCode::Dup),
         "loadlocal" | "load_local" => Some(OpCode::LoadLocal),
+        "loadlocali32" | "load_locali32" => Some(OpCode::LoadLocalI32),
+        "loadlocali64" | "load_locali64" => Some(OpCode::LoadLocalI64),
+        "loadlocalf32" | "load_localf32" => Some(OpCode::LoadLocalF32),
+        "loadlocalf64" | "load_localf64" => Some(OpCode::LoadLocalF64),
+        "loadlocalstr" | "load_localstr" => Some(OpCode::LoadLocalStr),
         "storelocal" | "store_local" => Some(OpCode::StoreLocal),
-        "add" => Some(OpCode::Add),
-        "sub" => Some(OpCode::Sub),
-        "mul" => Some(OpCode::Mul),
-        "div" => Some(OpCode::Div),
-        "mod" => Some(OpCode::Mod),
-        "neg" => Some(OpCode::Neg),
-        "equal" | "eq" => Some(OpCode::Equal),
-        "notequal" | "ne" => Some(OpCode::NotEqual),
-        "less" | "lt" => Some(OpCode::Less),
-        "lessequal" | "le" => Some(OpCode::LessEqual),
-        "greater" | "gt" => Some(OpCode::Greater),
-        "greaterequal" | "ge" => Some(OpCode::GreaterEqual),
+        "addi32" => Some(OpCode::AddI32), "subi32" => Some(OpCode::SubI32), "muli32" => Some(OpCode::MulI32), "divi32" => Some(OpCode::DivI32), "modi32" => Some(OpCode::ModI32), "negi32" => Some(OpCode::NegI32),
+        "addi64" => Some(OpCode::AddI64), "subi64" => Some(OpCode::SubI64), "muli64" => Some(OpCode::MulI64), "divi64" => Some(OpCode::DivI64), "modi64" => Some(OpCode::ModI64), "negi64" => Some(OpCode::NegI64),
+        "addf32" => Some(OpCode::AddF32), "subf32" => Some(OpCode::SubF32), "mulf32" => Some(OpCode::MulF32), "divf32" => Some(OpCode::DivF32), "modf32" => Some(OpCode::ModF32), "negf32" => Some(OpCode::NegF32),
+        "addf64" => Some(OpCode::AddF64), "subf64" => Some(OpCode::SubF64), "mulf64" => Some(OpCode::MulF64), "divf64" => Some(OpCode::DivF64), "modf64" => Some(OpCode::ModF64), "negf64" => Some(OpCode::NegF64),
+        "equali32" => Some(OpCode::EqualI32), "notequali32" => Some(OpCode::NotEqualI32), "lessi32" => Some(OpCode::LessI32), "lessequali32" => Some(OpCode::LessEqualI32), "greateri32" => Some(OpCode::GreaterI32), "greaterequali32" => Some(OpCode::GreaterEqualI32),
+        "equali64" => Some(OpCode::EqualI64), "notequali64" => Some(OpCode::NotEqualI64), "lessi64" => Some(OpCode::LessI64), "lessequali64" => Some(OpCode::LessEqualI64), "greateri64" => Some(OpCode::GreaterI64), "greaterequali64" => Some(OpCode::GreaterEqualI64),
+        "equalf32" => Some(OpCode::EqualF32), "notequalf32" => Some(OpCode::NotEqualF32), "lessf32" => Some(OpCode::LessF32), "lessequalf32" => Some(OpCode::LessEqualF32), "greaterf32" => Some(OpCode::GreaterF32), "greaterequalf32" => Some(OpCode::GreaterEqualF32),
+        "equalf64" => Some(OpCode::EqualF64), "notequalf64" => Some(OpCode::NotEqualF64), "lessf64" => Some(OpCode::LessF64), "lessequalf64" => Some(OpCode::LessEqualF64), "greaterf64" => Some(OpCode::GreaterF64), "greaterequalf64" => Some(OpCode::GreaterEqualF64),
+        "equalstr" => Some(OpCode::EqualStr), "notequalstr" => Some(OpCode::NotEqualStr),
         "jump" | "jmp" => Some(OpCode::Jump),
         "jumpif" | "jmpif" => Some(OpCode::JumpIf),
         "call" => Some(OpCode::Call),
@@ -327,6 +346,11 @@ fn parse_opcode(name: &str) -> Option<OpCode> {
         "nop" => Some(OpCode::Nop),
         "syscall" => Some(OpCode::Syscall),
         "halt" => Some(OpCode::Halt),
+        "spawn" => Some(OpCode::Spawn),
+        "yield" => Some(OpCode::Yield),
+        "and_bool" => Some(OpCode::AndBool),
+        "or_bool" => Some(OpCode::OrBool),
+        "await" => Some(OpCode::Await),
         "newarray" => Some(OpCode::NewArray),
         "loadelement" => Some(OpCode::LoadElement),
         "storeelement" => Some(OpCode::StoreElement),
@@ -344,21 +368,29 @@ fn parse_opcode(name: &str) -> Option<OpCode> {
 fn instruction_size(instr: &AsmInstruction) -> Result<usize, String> {
     match instr.opcode {
         // Opcode only
-        OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div |
-        OpCode::Mod | OpCode::Neg | OpCode::Equal | OpCode::NotEqual |
-        OpCode::Less | OpCode::LessEqual | OpCode::Greater | OpCode::GreaterEqual |
+        OpCode::AddI32 | OpCode::SubI32 | OpCode::MulI32 | OpCode::DivI32 | OpCode::ModI32 | OpCode::NegI32 |
+                OpCode::AddI64 | OpCode::SubI64 | OpCode::MulI64 | OpCode::DivI64 | OpCode::ModI64 | OpCode::NegI64 |
+                OpCode::AddF32 | OpCode::SubF32 | OpCode::MulF32 | OpCode::DivF32 | OpCode::ModF32 | OpCode::NegF32 |
+                OpCode::AddF64 | OpCode::SubF64 | OpCode::MulF64 | OpCode::DivF64 | OpCode::ModF64 | OpCode::NegF64 |
+                OpCode::EqualI32 | OpCode::NotEqualI32 | OpCode::LessI32 | OpCode::LessEqualI32 | OpCode::GreaterI32 | OpCode::GreaterEqualI32 |
+                OpCode::EqualI64 | OpCode::NotEqualI64 | OpCode::LessI64 | OpCode::LessEqualI64 | OpCode::GreaterI64 | OpCode::GreaterEqualI64 |
+                OpCode::EqualF32 | OpCode::NotEqualF32 | OpCode::LessF32 | OpCode::LessEqualF32 | OpCode::GreaterF32 | OpCode::GreaterEqualF32 |
+                OpCode::EqualF64 | OpCode::NotEqualF64 | OpCode::LessF64 | OpCode::LessEqualF64 | OpCode::GreaterF64 | OpCode::GreaterEqualF64 |
+                OpCode::EqualStr | OpCode::NotEqualStr |
         OpCode::Return | OpCode::Nop | OpCode::Halt | OpCode::Pop | OpCode::Dup |
-        OpCode::NewArray | OpCode::LoadElement | OpCode::StoreElement | OpCode::NewStruct |
-        OpCode::TryEnd | OpCode::Throw => Ok(1),
+        OpCode::NewArray | OpCode::LoadElement | OpCode::StoreElement |
+        OpCode::NewStruct | OpCode::TryEnd | OpCode::Throw |
+        OpCode::Yield | OpCode::Await => Ok(1),
+        OpCode::AndBool | OpCode::OrBool => Ok(1),
 
         // Opcode + u8
         OpCode::Syscall => Ok(2),
 
         // Opcode + u16
-        OpCode::Push | OpCode::LoadLocal | OpCode::StoreLocal | OpCode::LoadProperty | OpCode::StoreProperty => Ok(3),
+        OpCode::Push | OpCode::LoadLocal | OpCode::LoadLocalI32 | OpCode::LoadLocalI64 | OpCode::LoadLocalF32 | OpCode::LoadLocalF64 | OpCode::LoadLocalStr | OpCode::StoreLocal | OpCode::LoadProperty | OpCode::StoreProperty => Ok(3),
 
         // Opcode + u32
-        OpCode::Jump | OpCode::JumpIf | OpCode::TryStart => Ok(5),
+        OpCode::Jump | OpCode::JumpIf | OpCode::TryStart | OpCode::Spawn => Ok(5),
 
         // Opcode + u32 + u16
         OpCode::Call => Ok(7),

@@ -29,7 +29,7 @@ fn main() {
         };
         let path = std::path::Path::new(input_path);
         let base_path = path.parent().unwrap_or(std::path::Path::new("."));
-        match vre_compiler::compile(&source, Some(base_path)) {
+        match vre_compiler::compile(&source, input_path, Some(base_path)) {
             Ok(compiled) => (compiled.instructions, compiled.constants),
             Err(e) => {
                 eprintln!("Compile Error: {}", e);

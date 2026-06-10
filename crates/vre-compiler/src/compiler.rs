@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use vre_core::bytecode::opcode::OpCode;
 use vre_core::vm::value::Value;
 
-use crate::ast::{Program, Stmt, Expr, BinaryOperator, Block, Function};
+use crate::ast::{Type, Program, Stmt, Expr, BinaryOperator, Block, Function};
 
 #[derive(Debug)]
 pub struct CompiledProgram {
@@ -109,7 +109,7 @@ impl Compiler {
 
         // Register parameters as locals
         for param in &func.params {
-            self.locals.insert(param.clone(), self.local_count);
+            self.locals.insert(param.0.clone(), self.local_count);
             self.local_count += 1;
         }
 
@@ -129,14 +129,13 @@ impl Compiler {
         // Or, simpler: just use a fixed local count for all functions for now, like 256. 
         // No, let's do a quick pass to count locals.
         let _total_locals = func.params.len() as u16 + count_locals(&func.body);
-
         // The caller must emit the local_count. To patch it later, we must store the total_locals in a map.
         // We will maintain `function_locals: HashMap<String, u16>`.
 
         // Pop arguments into locals
         // The last argument pushed is at the top of the stack, so it corresponds to the last parameter.
         for param in func.params.iter().rev() {
-            let idx = *self.locals.get(param).unwrap();
+            let idx = *self.locals.get(&param.0).unwrap();
             self.emit_opcode(OpCode::StoreLocal);
             self.emit_u16(idx);
         }
@@ -158,7 +157,7 @@ impl Compiler {
 
     fn compile_statement(&mut self, stmt: Stmt) -> Result<(), String> {
         match stmt {
-            Stmt::Let(name, expr) => {
+            Stmt::Let(name, _, expr) => {
                 self.compile_expression(expr)?;
                 let idx = self.local_count;
                 self.locals.insert(name, idx);
@@ -200,19 +199,26 @@ impl Compiler {
                 self.emit_opcode(OpCode::StoreProperty);
                 self.emit_u16(prop_idx);
             }
-            Stmt::StructDecl(_, _) => {
+            Stmt::StructDecl(_, _) | Stmt::ClassDecl(_, _, _) => {
                 // Duck-typed, no runtime representation needed
             }
             Stmt::Expr(expr) => {
-                self.compile_expression(expr)?;
-                self.emit_opcode(OpCode::Pop); // discard result
+                match expr {
+                    Expr::Number(_) | Expr::StringLiteral(_) => {
+                        // Optimization: Skip emitting Push and Pop for pure literals
+                    }
+                    _ => {
+                        self.compile_expression(expr)?;
+                        self.emit_opcode(OpCode::Pop); // discard result
+                    }
+                }
             }
             Stmt::Return(opt_expr) => {
                 if let Some(expr) = opt_expr {
                     self.compile_expression(expr)?;
                 } else {
                     // return 0 if no expr
-                    let idx = self.add_constant(Value::Number(0.0));
+                    let idx = self.add_constant(Value::Float64(0.0));
                     self.emit_opcode(OpCode::Push);
                     self.emit_u16(idx);
                 }
@@ -325,6 +331,39 @@ impl Compiler {
                 let end_addr = self.instructions.len() as u32;
                 self.patch_u32(jump_end_offset, end_addr);
             }
+            Stmt::For(init, cond, inc, body) => {
+                self.compile_statement(*init)?;
+
+                let start_addr = self.instructions.len() as u32;
+
+                self.compile_expression(cond)?;
+                
+                // JumpIf body
+                self.emit_opcode(OpCode::JumpIf);
+                let jump_if_offset = self.instructions.len();
+                self.emit_u32(0); // placeholder for body
+
+                // Jump end
+                self.emit_opcode(OpCode::Jump);
+                let jump_end_offset = self.instructions.len();
+                self.emit_u32(0); // placeholder for end
+
+                // Body
+                let body_addr = self.instructions.len() as u32;
+                self.patch_u32(jump_if_offset, body_addr);
+                self.compile_block(body)?;
+
+                // Increment
+                self.compile_statement(*inc)?;
+
+                // Jump back to start
+                self.emit_opcode(OpCode::Jump);
+                self.emit_u32(start_addr);
+
+                // End
+                let end_addr = self.instructions.len() as u32;
+                self.patch_u32(jump_end_offset, end_addr);
+            }
         }
         Ok(())
     }
@@ -337,41 +376,104 @@ impl Compiler {
                 self.emit_u16(idx);
             }
             Expr::Number(val) => {
-                let idx = self.add_constant(Value::Number(val as f64));
+                let idx = self.add_constant(Value::Float64(val as f64));
                 self.emit_opcode(OpCode::Push);
                 self.emit_u16(idx);
             }
-            Expr::Identifier(name) => {
+            Expr::Identifier(name, expr_type) => {
                 if let Some(&idx) = self.locals.get(&name) {
-                    self.emit_opcode(OpCode::LoadLocal);
+                    let op = match expr_type.unwrap_or(Type::Any) {
+                        Type::Int32 => OpCode::LoadLocalI32,
+                        Type::Int64 => OpCode::LoadLocalI64,
+                        Type::Float32 => OpCode::LoadLocalF32,
+                        Type::Float64 => OpCode::LoadLocalF64,
+                        Type::String => OpCode::LoadLocalStr,
+                        _ => OpCode::LoadLocal,
+                    };
+                    self.emit_opcode(op);
                     self.emit_u16(idx);
                 } else {
                     return Err(format!("Undefined variable: {}", name));
                 }
             }
-            Expr::BinaryOp(left, op, right) => {
+            Expr::BinaryOp(left, op, right, expr_type) => {
                 self.compile_expression(*left)?;
                 self.compile_expression(*right)?;
+                let ty = expr_type.unwrap_or(Type::Float64);
                 match op {
-                    BinaryOperator::Add => self.emit_opcode(OpCode::Add),
-                    BinaryOperator::Subtract => self.emit_opcode(OpCode::Sub),
-                    BinaryOperator::Multiply => self.emit_opcode(OpCode::Mul),
-                    BinaryOperator::Divide => self.emit_opcode(OpCode::Div),
-                    BinaryOperator::Equals => self.emit_opcode(OpCode::Equal),
-                    BinaryOperator::NotEquals => self.emit_opcode(OpCode::NotEqual),
-                    BinaryOperator::LessThan => self.emit_opcode(OpCode::Less),
-                    BinaryOperator::LessThanOrEq => self.emit_opcode(OpCode::LessEqual),
-                    BinaryOperator::GreaterThan => self.emit_opcode(OpCode::Greater),
-                    BinaryOperator::GreaterThanOrEq => self.emit_opcode(OpCode::GreaterEqual),
+                    BinaryOperator::Add => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::AddI32),
+                        Type::Int64 => self.emit_opcode(OpCode::AddI64),
+                        Type::Float32 => self.emit_opcode(OpCode::AddF32),
+                        _ => self.emit_opcode(OpCode::AddF64),
+                    },
+                    BinaryOperator::Subtract => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::SubI32),
+                        Type::Int64 => self.emit_opcode(OpCode::SubI64),
+                        Type::Float32 => self.emit_opcode(OpCode::SubF32),
+                        _ => self.emit_opcode(OpCode::SubF64),
+                    },
+                    BinaryOperator::Multiply => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::MulI32),
+                        Type::Int64 => self.emit_opcode(OpCode::MulI64),
+                        Type::Float32 => self.emit_opcode(OpCode::MulF32),
+                        _ => self.emit_opcode(OpCode::MulF64),
+                    },
+                    BinaryOperator::Divide => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::DivI32),
+                        Type::Int64 => self.emit_opcode(OpCode::DivI64),
+                        Type::Float32 => self.emit_opcode(OpCode::DivF32),
+                        _ => self.emit_opcode(OpCode::DivF64),
+                    },
+                    BinaryOperator::Equals => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::EqualI32),
+                        Type::Int64 => self.emit_opcode(OpCode::EqualI64),
+                        Type::Float32 => self.emit_opcode(OpCode::EqualF32),
+                        Type::String => self.emit_opcode(OpCode::EqualStr),
+                        _ => self.emit_opcode(OpCode::EqualF64),
+                    },
+                    BinaryOperator::NotEquals => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::NotEqualI32),
+                        Type::Int64 => self.emit_opcode(OpCode::NotEqualI64),
+                        Type::Float32 => self.emit_opcode(OpCode::NotEqualF32),
+                        Type::String => self.emit_opcode(OpCode::NotEqualStr),
+                        _ => self.emit_opcode(OpCode::NotEqualF64),
+                    },
+                    BinaryOperator::LessThan => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::LessI32),
+                        Type::Int64 => self.emit_opcode(OpCode::LessI64),
+                        Type::Float32 => self.emit_opcode(OpCode::LessF32),
+                        _ => self.emit_opcode(OpCode::LessF64),
+                    },
+                    BinaryOperator::LessThanOrEq => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::LessEqualI32),
+                        Type::Int64 => self.emit_opcode(OpCode::LessEqualI64),
+                        Type::Float32 => self.emit_opcode(OpCode::LessEqualF32),
+                        _ => self.emit_opcode(OpCode::LessEqualF64),
+                    },
+                    BinaryOperator::GreaterThan => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::GreaterI32),
+                        Type::Int64 => self.emit_opcode(OpCode::GreaterI64),
+                        Type::Float32 => self.emit_opcode(OpCode::GreaterF32),
+                        _ => self.emit_opcode(OpCode::GreaterF64),
+                    },
+                    BinaryOperator::GreaterThanOrEq => match ty {
+                        Type::Int32 => self.emit_opcode(OpCode::GreaterEqualI32),
+                        Type::Int64 => self.emit_opcode(OpCode::GreaterEqualI64),
+                        Type::Float32 => self.emit_opcode(OpCode::GreaterEqualF32),
+                        _ => self.emit_opcode(OpCode::GreaterEqualF64),
+                    },
+                    BinaryOperator::And => self.emit_opcode(OpCode::AndBool),
+                    BinaryOperator::Or => self.emit_opcode(OpCode::OrBool),
                 }
             }
-            Expr::Call(name, args) => {
+            Expr::Call(name, args, _) => {
                 match name.as_str() {
                     "print" => {
                         self.compile_expression(args[0].clone())?;
                         self.emit_opcode(OpCode::Syscall);
                         self.emit_u8(0x01);
-                        let idx = self.add_constant(Value::Number(0.0));
+                        let idx = self.add_constant(Value::Float64(0.0));
                         self.emit_opcode(OpCode::Push);
                         self.emit_u16(idx);
                     }
@@ -462,7 +564,7 @@ impl Compiler {
             }
             Expr::ArrayLiteral(elements) => {
                 let size = elements.len() as f64;
-                let size_idx = self.add_constant(Value::Number(size));
+                let size_idx = self.add_constant(Value::Float64(size));
                 self.emit_opcode(OpCode::Push);
                 self.emit_u16(size_idx);
                 self.emit_opcode(OpCode::NewArray);
@@ -470,7 +572,7 @@ impl Compiler {
                 for (i, elem) in elements.into_iter().enumerate() {
                     self.emit_opcode(OpCode::Dup); // Dup the Ref
                     
-                    let idx = self.add_constant(Value::Number(i as f64));
+                    let idx = self.add_constant(Value::Float64(i as f64));
                     self.emit_opcode(OpCode::Push);
                     self.emit_u16(idx);
                     
@@ -491,7 +593,7 @@ impl Compiler {
                     self.emit_u16(key_idx);
                     self.compile_expression(val_expr)?;
                 }
-                let count_idx = self.add_constant(Value::Number(count));
+                let count_idx = self.add_constant(Value::Float64(count));
                 self.emit_opcode(OpCode::Push);
                 self.emit_u16(count_idx);
                 self.emit_opcode(OpCode::NewStruct);
@@ -502,16 +604,19 @@ impl Compiler {
                     self.compile_expression(key_expr)?;
                     self.compile_expression(val_expr)?;
                 }
-                let count_idx = self.add_constant(Value::Number(count));
+                let count_idx = self.add_constant(Value::Float64(count));
                 self.emit_opcode(OpCode::Push);
                 self.emit_u16(count_idx);
                 self.emit_opcode(OpCode::NewStruct);
             }
-            Expr::PropertyAccess(obj_expr, prop_name) => {
+            Expr::PropertyAccess(obj_expr, prop_name, _) => {
                 self.compile_expression(*obj_expr)?;
                 let prop_idx = self.add_constant(Value::String(prop_name));
                 self.emit_opcode(OpCode::LoadProperty);
                 self.emit_u16(prop_idx);
+            }
+            Expr::NewClass(_, _) | Expr::MethodCall(_, _, _, _) => {
+                unreachable!("Type checker transforms these into StructInit and Call")
             }
         }
         Ok(())
@@ -557,7 +662,7 @@ fn count_locals(block: &Block) -> u16 {
     let mut count = 0;
     for stmt in block {
         match stmt {
-            Stmt::Let(_, _) => count += 1,
+            Stmt::Let(..) => count += 1,
             Stmt::If(_, cons, alt) => {
                 count += count_locals(cons);
                 if let Some(a) = alt {
@@ -565,6 +670,10 @@ fn count_locals(block: &Block) -> u16 {
                 }
             }
             Stmt::While(_, body) => count += count_locals(body),
+            Stmt::For(init, _, _, body) => {
+                if let Stmt::Let(..) = **init { count += 1; }
+                count += count_locals(body);
+            }
             Stmt::TryCatch(try_block, _, catch_block) => {
                 count += count_locals(try_block);
                 count += count_locals(catch_block);
@@ -574,4 +683,6 @@ fn count_locals(block: &Block) -> u16 {
         }
     }
     count
+
+
 }

@@ -44,8 +44,9 @@ pub struct ExceptionHandler {
     pub stack_depth: usize,
 }
 
+use crate::scheduler::{Scheduler, Task};
+
 /// Vyauma Virtual Machine
-#[derive(Debug)]
 pub struct VirtualMachine {
     config: VreConfig,
     pub stack: Stack,
@@ -59,6 +60,9 @@ pub struct VirtualMachine {
 
     call_stack: Vec<CallFrame>,
     halted: bool,
+
+    scheduler: Scheduler,
+    current_task_id: u64,
     capabilities: CapabilityRegistry,
 
     resources: HashMap<usize, Resource>,
@@ -109,6 +113,8 @@ impl VirtualMachine {
             call_stack: Vec::new(),
             globals: Globals::new(0),
             heap: Heap::new(),
+            scheduler: Scheduler::new(),
+            current_task_id: 0, // 0 signifies the main synchronous context
             halted: false,
             capabilities,
             resources: HashMap::new(),
@@ -157,6 +163,32 @@ impl VirtualMachine {
         }
     }
 
+    /// Suspend the currently executing task
+    fn yield_current_task(&mut self) {
+        let task = Task {
+            id: self.current_task_id,
+            ip: self.ip,
+            stack: std::mem::replace(&mut self.stack, Stack::new(0)),
+            call_stack: std::mem::take(&mut self.call_stack),
+            state: crate::scheduler::TaskState::Ready,
+        };
+        self.scheduler.yield_task(task);
+    }
+
+    /// Resume the next task from the scheduler
+    fn resume_next_task(&mut self) -> bool {
+        if let Some(mut task) = self.scheduler.pop_next() {
+            self.current_task_id = task.id;
+            self.ip = task.ip;
+            self.stack = std::mem::replace(&mut task.stack, Stack::new(0));
+            self.call_stack = std::mem::take(&mut task.call_stack);
+            true
+        } else {
+            self.current_task_id = 0;
+            false
+        }
+    }
+
     /// Execute a single instruction
     pub fn step(&mut self) -> VreResult<()> {
         let opcode_byte = self.read_u8()?;
@@ -188,7 +220,7 @@ impl VirtualMachine {
             OpCode::Dup => self.stack.dup(),
 
             // ── Local variables ────────────────────────────────────────────
-            OpCode::LoadLocal => {
+            OpCode::LoadLocal | OpCode::LoadLocalI32 | OpCode::LoadLocalI64 | OpCode::LoadLocalF32 | OpCode::LoadLocalF64 | OpCode::LoadLocalStr => {
                 let index = self.read_u16()? as usize;
                 let frame = self.current_frame()?;
                 let value = frame.locals.load(index)?;
@@ -202,75 +234,115 @@ impl VirtualMachine {
                 frame.locals.store(index, value)
             }
 
-            // ── Arithmetic ─────────────────────────────────────────────────
-            OpCode::Add => {
-                let (a, b) = self.pop_two_numbers()?;
-                self.stack.push(Value::Number(a + b))
+            
+            // ── Arithmetic Int32 ──────────────────────────────────────────
+            OpCode::AddI32 => { let (a, b) = self.pop_two_i32()?; self.stack.push(Value::Int32(a + b)) }
+            OpCode::SubI32 => { let (a, b) = self.pop_two_i32()?; self.stack.push(Value::Int32(a - b)) }
+            OpCode::MulI32 => { let (a, b) = self.pop_two_i32()?; self.stack.push(Value::Int32(a * b)) }
+            OpCode::DivI32 => {
+                let (a, b) = self.pop_two_i32()?;
+                if b == 0 { return Err(VreError::DivisionByZero); }
+                self.stack.push(Value::Int32(a / b))
+            }
+            OpCode::ModI32 => {
+                let (a, b) = self.pop_two_i32()?;
+                if b == 0 { return Err(VreError::DivisionByZero); }
+                self.stack.push(Value::Int32(a % b))
+            }
+            OpCode::NegI32 => {
+                let a = self.pop_i32()?;
+                self.stack.push(Value::Int32(-a))
             }
 
-            OpCode::Sub => {
-                let (a, b) = self.pop_two_numbers()?;
-                self.stack.push(Value::Number(a - b))
+            // ── Arithmetic Int64 ──────────────────────────────────────────
+            OpCode::AddI64 => { let (a, b) = self.pop_two_i64()?; self.stack.push(Value::Int64(a + b)) }
+            OpCode::SubI64 => { let (a, b) = self.pop_two_i64()?; self.stack.push(Value::Int64(a - b)) }
+            OpCode::MulI64 => { let (a, b) = self.pop_two_i64()?; self.stack.push(Value::Int64(a * b)) }
+            OpCode::DivI64 => {
+                let (a, b) = self.pop_two_i64()?;
+                if b == 0 { return Err(VreError::DivisionByZero); }
+                self.stack.push(Value::Int64(a / b))
+            }
+            OpCode::ModI64 => {
+                let (a, b) = self.pop_two_i64()?;
+                if b == 0 { return Err(VreError::DivisionByZero); }
+                self.stack.push(Value::Int64(a % b))
+            }
+            OpCode::NegI64 => {
+                let a = self.pop_i64()?;
+                self.stack.push(Value::Int64(-a))
             }
 
-            OpCode::Mul => {
-                let (a, b) = self.pop_two_numbers()?;
-                self.stack.push(Value::Number(a * b))
-            }
+            // ── Arithmetic Float32 ────────────────────────────────────────
+            OpCode::AddF32 => { let (a, b) = self.pop_two_f32()?; self.stack.push(Value::Float32(a + b)) }
+            OpCode::SubF32 => { let (a, b) = self.pop_two_f32()?; self.stack.push(Value::Float32(a - b)) }
+            OpCode::MulF32 => { let (a, b) = self.pop_two_f32()?; self.stack.push(Value::Float32(a * b)) }
+            OpCode::DivF32 => { let (a, b) = self.pop_two_f32()?; if b == 0.0 { return Err(VreError::DivisionByZero); } self.stack.push(Value::Float32(a / b)) }
+            OpCode::ModF32 => { let (a, b) = self.pop_two_f32()?; if b == 0.0 { return Err(VreError::DivisionByZero); } self.stack.push(Value::Float32(a % b)) }
+            OpCode::NegF32 => { let a = self.pop_f32()?; self.stack.push(Value::Float32(-a)) }
 
-            OpCode::Div => {
-                let (a, b) = self.pop_two_numbers()?;
-                if b == 0.0 {
-                    return Err(VreError::DivisionByZero);
+            // ── Arithmetic Float64 ────────────────────────────────────────
+            OpCode::AddF64 => { let (a, b) = self.pop_two_f64()?; self.stack.push(Value::Float64(a + b)) }
+            OpCode::SubF64 => { let (a, b) = self.pop_two_f64()?; self.stack.push(Value::Float64(a - b)) }
+            OpCode::MulF64 => { let (a, b) = self.pop_two_f64()?; self.stack.push(Value::Float64(a * b)) }
+            OpCode::DivF64 => { let (a, b) = self.pop_two_f64()?; if b == 0.0 { return Err(VreError::DivisionByZero); } self.stack.push(Value::Float64(a / b)) }
+            OpCode::ModF64 => { let (a, b) = self.pop_two_f64()?; if b == 0.0 { return Err(VreError::DivisionByZero); } self.stack.push(Value::Float64(a % b)) }
+            OpCode::NegF64 => { let a = self.pop_f64()?; self.stack.push(Value::Float64(-a)) }
+
+            // ── Comparison Int32 ──────────────────────────────────────────
+            OpCode::EqualI32 => { let (a, b) = self.pop_two_i32()?; self.stack.push(Value::Bool(a == b)) }
+            OpCode::NotEqualI32 => { let (a, b) = self.pop_two_i32()?; self.stack.push(Value::Bool(a != b)) }
+            OpCode::LessI32 => { let (a, b) = self.pop_two_i32()?; self.stack.push(Value::Bool(a < b)) }
+            OpCode::LessEqualI32 => { let (a, b) = self.pop_two_i32()?; self.stack.push(Value::Bool(a <= b)) }
+            OpCode::GreaterI32 => { let (a, b) = self.pop_two_i32()?; self.stack.push(Value::Bool(a > b)) }
+            OpCode::GreaterEqualI32 => { let (a, b) = self.pop_two_i32()?; self.stack.push(Value::Bool(a >= b)) }
+
+            // ── Comparison Int64 ──────────────────────────────────────────
+            OpCode::EqualI64 => { let (a, b) = self.pop_two_i64()?; self.stack.push(Value::Bool(a == b)) }
+            OpCode::NotEqualI64 => { let (a, b) = self.pop_two_i64()?; self.stack.push(Value::Bool(a != b)) }
+            OpCode::LessI64 => { let (a, b) = self.pop_two_i64()?; self.stack.push(Value::Bool(a < b)) }
+            OpCode::LessEqualI64 => { let (a, b) = self.pop_two_i64()?; self.stack.push(Value::Bool(a <= b)) }
+            OpCode::GreaterI64 => { let (a, b) = self.pop_two_i64()?; self.stack.push(Value::Bool(a > b)) }
+            OpCode::GreaterEqualI64 => { let (a, b) = self.pop_two_i64()?; self.stack.push(Value::Bool(a >= b)) }
+
+            // ── Comparison Float32 ────────────────────────────────────────
+            OpCode::EqualF32 => { let (a, b) = self.pop_two_f32()?; self.stack.push(Value::Bool(a == b)) }
+            OpCode::NotEqualF32 => { let (a, b) = self.pop_two_f32()?; self.stack.push(Value::Bool(a != b)) }
+            OpCode::LessF32 => { let (a, b) = self.pop_two_f32()?; self.stack.push(Value::Bool(a < b)) }
+            OpCode::LessEqualF32 => { let (a, b) = self.pop_two_f32()?; self.stack.push(Value::Bool(a <= b)) }
+            OpCode::GreaterF32 => { let (a, b) = self.pop_two_f32()?; self.stack.push(Value::Bool(a > b)) }
+            OpCode::GreaterEqualF32 => { let (a, b) = self.pop_two_f32()?; self.stack.push(Value::Bool(a >= b)) }
+
+            // ── Comparison Float64 ────────────────────────────────────────
+            OpCode::EqualF64 => { let (a, b) = self.pop_two_f64()?; self.stack.push(Value::Bool(a == b)) }
+            OpCode::NotEqualF64 => { let (a, b) = self.pop_two_f64()?; self.stack.push(Value::Bool(a != b)) }
+            OpCode::LessF64 => { let (a, b) = self.pop_two_f64()?; self.stack.push(Value::Bool(a < b)) }
+            OpCode::LessEqualF64 => { let (a, b) = self.pop_two_f64()?; self.stack.push(Value::Bool(a <= b)) }
+            OpCode::GreaterF64 => { let (a, b) = self.pop_two_f64()?; self.stack.push(Value::Bool(a > b)) }
+            OpCode::GreaterEqualF64 => { let (a, b) = self.pop_two_f64()?; self.stack.push(Value::Bool(a >= b)) }
+
+            // ── Comparison String ─────────────────────────────────────────
+            OpCode::EqualStr => { let (a, b) = self.pop_two_string()?; self.stack.push(Value::Bool(a == b)) }
+            OpCode::NotEqualStr => { let (a, b) = self.pop_two_string()?; self.stack.push(Value::Bool(a != b)) }
+            OpCode::AndBool => {
+                let b = self.stack.pop().unwrap();
+                let a = self.stack.pop().unwrap();
+                if let (Value::Bool(ba), Value::Bool(bb)) = (a, b) {
+                    self.stack.push(Value::Bool(ba && bb))
+                } else {
+                    Err(VreError::TypeMismatch)
                 }
-                self.stack.push(Value::Number(a / b))
             }
-
-            OpCode::Mod => {
-                let (a, b) = self.pop_two_numbers()?;
-                if b == 0.0 {
-                    return Err(VreError::DivisionByZero);
+            OpCode::OrBool => {
+                let b = self.stack.pop().unwrap();
+                let a = self.stack.pop().unwrap();
+                if let (Value::Bool(ba), Value::Bool(bb)) = (a, b) {
+                    self.stack.push(Value::Bool(ba || bb))
+                } else {
+                    Err(VreError::TypeMismatch)
                 }
-                self.stack.push(Value::Number(a % b))
             }
 
-            OpCode::Neg => {
-                let a = self.pop_number()?;
-                self.stack.push(Value::Number(-a))
-            }
-
-            // ── Comparison ─────────────────────────────────────────────────
-            OpCode::Equal => {
-                let b = self.stack.pop()?;
-                let a = self.stack.pop()?;
-                self.stack.push(Value::Bool(a == b))
-            }
-
-            OpCode::NotEqual => {
-                let b = self.stack.pop()?;
-                let a = self.stack.pop()?;
-                self.stack.push(Value::Bool(a != b))
-            }
-
-            OpCode::Less => {
-                let (a, b) = self.pop_two_numbers()?;
-                self.stack.push(Value::Bool(a < b))
-            }
-
-            OpCode::LessEqual => {
-                let (a, b) = self.pop_two_numbers()?;
-                self.stack.push(Value::Bool(a <= b))
-            }
-
-            OpCode::Greater => {
-                let (a, b) = self.pop_two_numbers()?;
-                self.stack.push(Value::Bool(a > b))
-            }
-
-            OpCode::GreaterEqual => {
-                let (a, b) = self.pop_two_numbers()?;
-                self.stack.push(Value::Bool(a >= b))
-            }
 
             // ── Control flow ───────────────────────────────────────────────
             OpCode::Jump => {
@@ -306,30 +378,23 @@ impl VirtualMachine {
 
                 if *count > 50 {
                     if !self.jit_cache.contains_key(&target) {
-                        // Extract function opcodes
-                        // In a real JIT we'd parse the full function body until Return.
-                        // Here we just grab the next 50 bytes and roughly decode them for our PoC JIT.
                         let mut end = target;
                         while end < self.instructions.len() && self.instructions[end] != OpCode::Return as u8 {
-                            end += 1;
+                            // Advance by instruction length
+                            let op = self.instructions[end];
+                            if op == OpCode::Push as u8 { end += 3; }
+                            else if op == OpCode::LoadLocal as u8 || op == OpCode::StoreLocal as u8 { end += 2; }
+                            else if op == OpCode::Jump as u8 || op == OpCode::JumpIf as u8 { end += 5; }
+                            else if op == OpCode::Call as u8 { end += 7; } 
+                            else if op == OpCode::CallNative as u8 { end += 5; } // u32 native index
+                            else { end += 1; }
                         }
                         if end < self.instructions.len() {
                             end += 1; // Include Return
                             let body = &self.instructions[target..end];
-                            // Quick & dirty decode
-                            let mut ops = Vec::new();
-                            let mut i = 0;
-                            while i < body.len() {
-                                let byte = body[i];
-                                if byte == OpCode::Add as u8 { ops.push(OpCode::Add); }
-                                else if byte == OpCode::Sub as u8 { ops.push(OpCode::Sub); }
-                                else if byte == OpCode::Mul as u8 { ops.push(OpCode::Mul); }
-                                else if byte == OpCode::Div as u8 { ops.push(OpCode::Div); }
-                                i += 1;
-                            }
                             println!("=> [JIT] Compiling function at IP {} into native x86_64 machine code...", target);
                             let mut compiler = crate::jit::compiler::JitCompiler::new();
-                            let mem = compiler.compile(&ops);
+                            let mem = compiler.compile(body);
                             self.jit_cache.insert(target, mem);
                         }
                     }
@@ -359,11 +424,48 @@ impl VirtualMachine {
                         Ok(())
                     }
                     None => {
-                        // Return from top-level — treat as halt
-                        self.halted = true;
-                        Ok(())
+                        // Return from top-level — task complete!
+                        if self.resume_next_task() {
+                            // Another task took over
+                            Ok(())
+                        } else {
+                            // No more tasks, halt the VM
+                            self.halted = true;
+                            Ok(())
+                        }
                     }
                 }
+            }
+
+            OpCode::Spawn => {
+                let target = self.read_u32()? as usize;
+                // Create task and push to ready queue
+                let task_id = self.scheduler.spawn(target, self.config.max_stack_size);
+                self.stack.push(Value::Int64(task_id as i64))?;
+                Ok(())
+            }
+
+            OpCode::Yield => {
+                self.yield_current_task();
+                if !self.resume_next_task() {
+                    // No other tasks to resume, just continue the current one
+                    self.resume_next_task(); // Pop the task we just yielded!
+                }
+                Ok(())
+            }
+
+            OpCode::Await => {
+                // Simplified Await: Just act as a yield for now
+                // In a robust implementation, this would track the target task ID 
+                // and block the current task until the target completes.
+                let _target_id = self.stack.pop()?;
+                self.yield_current_task();
+                if !self.resume_next_task() {
+                    self.resume_next_task();
+                }
+                // Push placeholder result
+                self.stack.push(Value::Null)?;
+                Ok(())
             }
 
             OpCode::CallNative => {
@@ -412,17 +514,17 @@ impl VirtualMachine {
                 let size = self.pop_number()? as usize;
                 let arr = vec![Value::Null; size];
                 let id = self.heap.allocate(HeapObject::Array(arr));
-                self.stack.push(Value::Ref(id))
+                self.stack.push(Value::Reference(id))
             }
 
             OpCode::LoadElement => {
                 let index_val = self.stack.pop()?;
                 let ref_val = self.stack.pop()?;
-                if let Value::Ref(id) = ref_val {
+                if let Value::Reference(id) = ref_val {
                     let obj = self.heap.get(id)?;
                     match obj {
                         HeapObject::Array(arr) => {
-                            if let Value::Number(n) = index_val {
+                            if let Value::Float64(n) = index_val {
                                 let index = n as usize;
                                 if index >= arr.len() {
                                     println!("StoreElement array bound fault! Index: {}, len: {}", index, arr.len());
@@ -452,11 +554,11 @@ impl VirtualMachine {
                 let val = self.stack.pop()?;
                 let index_val = self.stack.pop()?;
                 let ref_val = self.stack.pop()?;
-                if let Value::Ref(id) = ref_val {
+                if let Value::Reference(id) = ref_val {
                     let obj = self.heap.get_mut(id)?;
                     match obj {
                         HeapObject::Array(arr) => {
-                            if let Value::Number(n) = index_val {
+                            if let Value::Float64(n) = index_val {
                                 let index = n as usize;
                                 if index >= arr.len() {
                                     println!("StoreElement array bound fault! Index: {}, len: {}", index, arr.len());
@@ -495,7 +597,7 @@ impl VirtualMachine {
                     fields.insert(key, val);
                 }
                 let id = self.heap.allocate(HeapObject::Struct(fields));
-                self.stack.push(Value::Ref(id))
+                self.stack.push(Value::Reference(id))
             }
 
             OpCode::LoadProperty => {
@@ -505,7 +607,7 @@ impl VirtualMachine {
                     _ => return Err(VreError::TypeMismatch),
                 };
                 let ref_val = self.stack.pop()?;
-                if let Value::Ref(id) = ref_val {
+                if let Value::Reference(id) = ref_val {
                     let obj = self.heap.get(id)?;
                     match obj {
                         HeapObject::Struct(fields) => {
@@ -527,7 +629,7 @@ impl VirtualMachine {
                 };
                 let val = self.stack.pop()?;
                 let ref_val = self.stack.pop()?;
-                if let Value::Ref(id) = ref_val {
+                if let Value::Reference(id) = ref_val {
                     let obj = self.heap.get_mut(id)?;
                     match obj {
                         HeapObject::Struct(fields) => {
@@ -559,9 +661,9 @@ impl VirtualMachine {
                         let mut buf = [0u8; 1];
                         let bytes_read = std::io::stdin().read(&mut buf)?;
                         if bytes_read == 0 {
-                            self.stack.push(Value::Number(-1.0))
+                            self.stack.push(Value::Float64(-1.0))
                         } else {
-                            self.stack.push(Value::Number(buf[0] as f64))
+                            self.stack.push(Value::Float64(buf[0] as f64))
                         }
                     }
                     0x03 => {
@@ -569,7 +671,7 @@ impl VirtualMachine {
                         let buffer_ref = self.stack.pop()?;
                         let fd = self.pop_number()? as usize;
                         
-                        if let Value::Ref(id) = buffer_ref {
+                        if let Value::Reference(id) = buffer_ref {
                             // We need to borrow the resource mutably to read from it.
                             // To avoid borrow checker issues with `self`, we take the resource out.
                             if let Some(mut resource) = self.resources.remove(&fd) {
@@ -587,17 +689,17 @@ impl VirtualMachine {
                                         if let HeapObject::Array(arr) = obj {
                                             for i in 0..n {
                                                 if i < arr.len() {
-                                                    arr[i] = Value::Number(buf[i] as f64);
+                                                    arr[i] = Value::Float64(buf[i] as f64);
                                                 }
                                             }
                                         }
-                                        self.stack.push(Value::Number(n as f64))?;
+                                        self.stack.push(Value::Float64(n as f64))?;
                                     }
-                                    Err(_) => { self.stack.push(Value::Number(-1.0))?; }
+                                    Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
                                 }
                                 self.resources.insert(fd, resource);
                             } else {
-                                self.stack.push(Value::Number(-1.0))?;
+                                self.stack.push(Value::Float64(-1.0))?;
                             }
                         } else {
                             return Err(VreError::TypeMismatch);
@@ -609,12 +711,12 @@ impl VirtualMachine {
                         let buffer_ref = self.stack.pop()?;
                         let fd = self.pop_number()? as usize;
 
-                        if let Value::Ref(id) = buffer_ref {
+                        if let Value::Reference(id) = buffer_ref {
                             let obj = self.heap.get(id)?;
                             if let HeapObject::Array(arr) = obj {
                                 let mut buf = Vec::new();
                                 for val in arr {
-                                    if let Value::Number(n) = val {
+                                    if let Value::Float64(n) = val {
                                         buf.push(*n as u8);
                                     }
                                 }
@@ -625,12 +727,12 @@ impl VirtualMachine {
                                         _ => Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid resource for write")),
                                     };
                                     match res {
-                                        Ok(n) => { self.stack.push(Value::Number(n as f64))?; }
-                                        Err(_) => { self.stack.push(Value::Number(-1.0))?; }
+                                        Ok(n) => { self.stack.push(Value::Float64(n as f64))?; }
+                                        Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
                                     }
                                     self.resources.insert(fd, resource);
                                 } else {
-                                    self.stack.push(Value::Number(-1.0))?;
+                                    self.stack.push(Value::Float64(-1.0))?;
                                 }
                             } else {
                                 return Err(VreError::TypeMismatch);
@@ -644,9 +746,9 @@ impl VirtualMachine {
                         // close(fd)
                         let fd = self.pop_number()? as usize;
                         if self.resources.remove(&fd).is_some() {
-                            self.stack.push(Value::Number(0.0))?;
+                            self.stack.push(Value::Float64(0.0))?;
                         } else {
-                            self.stack.push(Value::Number(-1.0))?;
+                            self.stack.push(Value::Float64(-1.0))?;
                         }
                         Ok(())
                     }
@@ -654,7 +756,7 @@ impl VirtualMachine {
                         // sleep(ms)
                         let ms = self.pop_number()? as u64;
                         std::thread::sleep(std::time::Duration::from_millis(ms));
-                        self.stack.push(Value::Number(0.0))?;
+                        self.stack.push(Value::Float64(0.0))?;
                         Ok(())
                     }
                     0x07 => {
@@ -663,7 +765,7 @@ impl VirtualMachine {
                         self.gc()?;
                         let objects_after = self.heap.live_objects;
                         let reclaimed = objects_before.saturating_sub(objects_after);
-                        self.stack.push(Value::Number(reclaimed as f64))?;
+                        self.stack.push(Value::Float64(reclaimed as f64))?;
                         Ok(())
                     }
                     0x10 => {
@@ -678,9 +780,9 @@ impl VirtualMachine {
                                     let fd = self.next_fd;
                                     self.next_fd += 1;
                                     self.resources.insert(fd, Resource::File(file));
-                                    self.stack.push(Value::Number(fd as f64))?;
+                                    self.stack.push(Value::Float64(fd as f64))?;
                                 }
-                                Err(_) => { self.stack.push(Value::Number(-1.0))?; }
+                                Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
                             }
                         } else {
                             return Err(VreError::TypeMismatch);
@@ -704,9 +806,9 @@ impl VirtualMachine {
                                         return Err(VreError::RuntimeFault);
                                     }
                                     self.resources.insert(fd, Resource::TcpStream(stream));
-                                    self.stack.push(Value::Number(fd as f64))?;
+                                    self.stack.push(Value::Float64(fd as f64))?;
                                 }
-                                Err(_) => { self.stack.push(Value::Number(-1.0))?; }
+                                Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
                             }
                         } else {
                             return Err(VreError::TypeMismatch);
@@ -728,9 +830,9 @@ impl VirtualMachine {
                                     return Err(VreError::RuntimeFault);
                                 }
                                 self.resources.insert(fd, Resource::TcpListener(listener));
-                                self.stack.push(Value::Number(fd as f64))?;
+                                self.stack.push(Value::Float64(fd as f64))?;
                             }
-                            Err(_) => { self.stack.push(Value::Number(-1.0))?; }
+                            Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
                         }
                         Ok(())
                     }
@@ -746,12 +848,12 @@ impl VirtualMachine {
                                         return Err(VreError::RuntimeFault);
                                     }
                                     self.resources.insert(fd, Resource::TcpStream(stream));
-                                    self.stack.push(Value::Number(fd as f64))?;
+                                    self.stack.push(Value::Float64(fd as f64))?;
                                 }
-                                Err(_) => { self.stack.push(Value::Number(-1.0))?; }
+                                Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
                             }
                         } else {
-                            self.stack.push(Value::Number(-1.0))?;
+                            self.stack.push(Value::Float64(-1.0))?;
                         }
                         Ok(())
                     }
@@ -770,7 +872,7 @@ impl VirtualMachine {
                                 _ => {}
                             }
                         }
-                        self.stack.push(Value::Number(0.0))?;
+                        self.stack.push(Value::Float64(0.0))?;
                         Ok(())
                     }
                     0x24 => {
@@ -782,11 +884,11 @@ impl VirtualMachine {
                             Ok(_) => {
                                 let mut fds = Vec::new();
                                 for event in self.events.iter() {
-                                    fds.push(Value::Number(event.token().0 as f64));
+                                    fds.push(Value::Float64(event.token().0 as f64));
                                 }
                                 let array_obj = HeapObject::Array(fds);
                                 let ref_id = self.heap.allocate(array_obj);
-                                self.stack.push(Value::Ref(ref_id))?;
+                                self.stack.push(Value::Reference(ref_id))?;
                             }
                             Err(_) => {
                                 return Err(VreError::RuntimeFault);
@@ -799,9 +901,9 @@ impl VirtualMachine {
                         let val = self.stack.pop()?;
                         if let Value::String(s) = val {
                             let bytes = s.into_bytes();
-                            let arr = bytes.into_iter().map(|b| Value::Number(b as f64)).collect();
+                            let arr = bytes.into_iter().map(|b| Value::Float64(b as f64)).collect();
                             let id = self.heap.allocate(HeapObject::Array(arr));
-                            self.stack.push(Value::Ref(id))?;
+                            self.stack.push(Value::Reference(id))?;
                         } else {
                             return Err(VreError::TypeMismatch);
                         }
@@ -810,12 +912,12 @@ impl VirtualMachine {
                     0x31 => {
                         // bytes_to_string(array_ref) -> string
                         let val = self.stack.pop()?;
-                        if let Value::Ref(id) = val {
+                        if let Value::Reference(id) = val {
                             let obj = self.heap.get(id)?;
                             if let HeapObject::Array(arr) = obj {
                                 let mut bytes = Vec::new();
                                 for item in arr {
-                                    if let Value::Number(n) = item {
+                                    if let Value::Float64(n) = item {
                                         bytes.push(*n as u8);
                                     } else {
                                         return Err(VreError::TypeMismatch);
@@ -846,23 +948,43 @@ impl VirtualMachine {
         let mut marked = vec![false; capacity];
         let mut worklist = Vec::new();
 
-        // 1. Gather roots
+        // 1. Trace roots (Current task)
         for val in self.stack.values() {
-            if let Value::Ref(id) = val {
+            if let Value::Reference(id) = val {
                 worklist.push(*id);
             }
         }
 
         for frame in &self.call_stack {
             for val in frame.locals.values() {
-                if let Value::Ref(id) = val {
+                if let Value::Reference(id) = val {
                     worklist.push(*id);
                 }
             }
         }
 
-        // TODO: Trace globals if they are implemented later (currently skipped as per compiler constraints)
+        // 1.5. Trace roots (Scheduled tasks)
+        for task in self.scheduler.iter_tasks() {
+            for val in task.stack.values() {
+                if let Value::Reference(id) = val {
+                    worklist.push(*id);
+                }
+            }
+            for frame in &task.call_stack {
+                for val in frame.locals.values() {
+                    if let Value::Reference(id) = val {
+                        worklist.push(*id);
+                    }
+                }
+            }
+        }
 
+        // Trace globals
+        for val in self.globals.values() {
+            if let Value::Reference(id) = val {
+                worklist.push(*id);
+            }
+        }
         // 2. Mark
         while let Some(id) = worklist.pop() {
             let idx = id as usize;
@@ -872,19 +994,19 @@ impl VirtualMachine {
                     match obj {
                         HeapObject::Array(arr) => {
                             for val in arr {
-                                if let Value::Ref(child) = val {
+                                if let Value::Reference(child) = val {
                                     worklist.push(*child);
                                 }
                             }
                         }
                         HeapObject::Struct(fields) => {
                             for val in fields.values() {
-                                if let Value::Ref(child) = val {
+                                if let Value::Reference(child) = val {
                                     worklist.push(*child);
                                 }
                             }
                         }
-                        HeapObject::String(_) => {}
+                        HeapObject::String(_) | HeapObject::Function(_) => {}
                     }
                 }
             }
@@ -934,10 +1056,7 @@ impl VirtualMachine {
 
     /// Pop a number from the stack, returning TypeMismatch on wrong type
     fn pop_number(&mut self) -> VreResult<f64> {
-        match self.stack.pop()? {
-            Value::Number(n) => Ok(n),
-            _ => Err(VreError::TypeMismatch),
-        }
+        self.stack.pop()?.as_f64()
     }
 
     /// Pop a bool from the stack, returning TypeMismatch on wrong type
@@ -949,6 +1068,74 @@ impl VirtualMachine {
     }
 
     /// Pop two numbers (a, b) where `a` was pushed first, `b` second
+
+    // ── Typed Stack Helpers ───────────────────────────────────────────────
+
+    fn pop_two_i32(&mut self) -> VreResult<(i32, i32)> {
+        let b = self.pop_i32()?;
+        let a = self.pop_i32()?;
+        Ok((a, b))
+    }
+
+    fn pop_two_i64(&mut self) -> VreResult<(i64, i64)> {
+        let b = self.pop_i64()?;
+        let a = self.pop_i64()?;
+        Ok((a, b))
+    }
+
+    fn pop_two_f32(&mut self) -> VreResult<(f32, f32)> {
+        let b = self.pop_f32()?;
+        let a = self.pop_f32()?;
+        Ok((a, b))
+    }
+
+    fn pop_two_f64(&mut self) -> VreResult<(f64, f64)> {
+        let b = self.pop_f64()?;
+        let a = self.pop_f64()?;
+        Ok((a, b))
+    }
+
+    fn pop_two_string(&mut self) -> VreResult<(String, String)> {
+        let b = self.pop_string()?;
+        let a = self.pop_string()?;
+        Ok((a, b))
+    }
+
+    fn pop_i32(&mut self) -> VreResult<i32> {
+        match self.stack.pop()? {
+            Value::Int32(v) => Ok(v),
+            _ => Err(VreError::TypeMismatch),
+        }
+    }
+
+    fn pop_i64(&mut self) -> VreResult<i64> {
+        match self.stack.pop()? {
+            Value::Int64(v) => Ok(v),
+            _ => Err(VreError::TypeMismatch),
+        }
+    }
+
+    fn pop_f32(&mut self) -> VreResult<f32> {
+        match self.stack.pop()? {
+            Value::Float32(v) => Ok(v),
+            _ => Err(VreError::TypeMismatch),
+        }
+    }
+
+    fn pop_f64(&mut self) -> VreResult<f64> {
+        match self.stack.pop()? {
+            Value::Float64(v) => Ok(v),
+            _ => Err(VreError::TypeMismatch),
+        }
+    }
+
+    fn pop_string(&mut self) -> VreResult<String> {
+        match self.stack.pop()? {
+            Value::String(s) => Ok(s),
+            _ => Err(VreError::TypeMismatch),
+        }
+    }
+
     fn pop_two_numbers(&mut self) -> VreResult<(f64, f64)> {
         let b = self.pop_number()?;
         let a = self.pop_number()?;
@@ -967,7 +1154,7 @@ impl VirtualMachine {
     pub fn constants(&self) -> &ConstantPool { &self.constants }
 
     /// Get a mutable reference to the current call frame
-    fn current_frame_mut(&mut self) -> VreResult<&mut CallFrame> {
+    pub fn current_frame_mut(&mut self) -> VreResult<&mut CallFrame> {
         self.call_stack.last_mut().ok_or(VreError::InvalidStackAccess)
     }
 

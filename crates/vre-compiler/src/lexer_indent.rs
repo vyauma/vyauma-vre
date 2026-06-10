@@ -9,7 +9,6 @@ pub enum Token {
     Return,
     Struct,
     New,
-    Class,
     Import,
     As,
     Try,
@@ -45,12 +44,14 @@ pub enum Token {
     // Punctuation
     LParen,
     RParen,
-    LBrace,
-    RBrace,
     LBracket,
     RBracket,
     Comma,
-    Semicolon,
+
+    // Indentation Control
+    Newline,
+    Indent,
+    Dedent,
 
     // Special
     Eof,
@@ -69,7 +70,6 @@ impl Token {
             "true" => Token::Boolean(true),
             "false" => Token::Boolean(false),
             "struct" => Token::Struct,
-            "class" => Token::Class,
             "new" => Token::New,
             "import" => Token::Import,
             "as" => Token::As,
@@ -82,22 +82,28 @@ impl Token {
     }
 }
 
-pub struct Lexer<'a> {
+pub struct LexerIndent<'a> {
     input: &'a str,
     position: usize,
     read_position: usize,
     ch: Option<char>,
+    indent_stack: Vec<usize>,
+    pending_tokens: std::collections::VecDeque<Token>,
+    at_line_start: bool,
     pub line: usize,
     pub col: usize,
 }
 
-impl<'a> Lexer<'a> {
+impl<'a> LexerIndent<'a> {
     pub fn new(input: &'a str) -> Self {
-        let mut lexer = Lexer {
+        let mut lexer = LexerIndent {
             input,
             position: 0,
             read_position: 0,
             ch: None,
+            indent_stack: vec![0],
+            pending_tokens: std::collections::VecDeque::new(),
+            at_line_start: true,
             line: 1,
             col: 0,
         };
@@ -116,7 +122,7 @@ impl<'a> Lexer<'a> {
         } else {
             self.input[self.read_position..].chars().next()
         };
-        // Track current char position for newlines
+        // Track line and col on the *consumed* character
         if let Some('\n') = self.ch {
             self.line += 1;
             self.col = 0;
@@ -139,9 +145,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn skip_whitespace(&mut self) {
+    fn skip_whitespace_inline(&mut self) {
         while let Some(c) = self.ch {
-            if c.is_whitespace() {
+            if c == ' ' || c == '\t' || c == '\r' {
                 self.read_char();
             } else {
                 break;
@@ -157,13 +163,78 @@ impl<'a> Lexer<'a> {
                 }
                 self.read_char();
             }
-            self.skip_whitespace();
         }
     }
 
     pub fn next_token(&mut self) -> Token {
+        if let Some(token) = self.pending_tokens.pop_front() {
+            return token;
+        }
+
+        if self.at_line_start {
+            let mut spaces = 0;
+            let mut is_empty_line = false;
+            
+            loop {
+                match self.ch {
+                    Some(' ') => {
+                        spaces += 1;
+                        self.read_char();
+                    }
+                    Some('\t') => {
+                        spaces += 4;
+                        self.read_char();
+                    }
+                    Some('\r') => {
+                        self.read_char(); // ignore CR
+                    }
+                    Some('\n') => {
+                        // Empty line with only spaces
+                        spaces = 0;
+                        self.read_char();
+                    }
+                    Some('/') => {
+                        if self.peek_char() == Some('/') {
+                            // Line contains only comment
+                            self.skip_comment();
+                            spaces = 0;
+                            // the comment loop breaks AT the newline but doesn't consume it
+                        } else {
+                            break;
+                        }
+                    }
+                    None => {
+                        is_empty_line = true;
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+            
+            if !is_empty_line && self.ch != Some('\n') {
+                self.at_line_start = false;
+                let current_indent = *self.indent_stack.last().unwrap();
+                
+                if spaces > current_indent {
+                    self.indent_stack.push(spaces);
+                    return Token::Indent;
+                } else if spaces < current_indent {
+                    while *self.indent_stack.last().unwrap() > spaces {
+                        self.indent_stack.pop();
+                        self.pending_tokens.push_back(Token::Dedent);
+                    }
+                    if *self.indent_stack.last().unwrap() != spaces {
+                        return Token::Error(format!("Inconsistent indentation: expected {}, found {}", self.indent_stack.last().unwrap(), spaces));
+                    }
+                    if let Some(tok) = self.pending_tokens.pop_front() {
+                        return tok;
+                    }
+                }
+            }
+        }
+
         loop {
-            self.skip_whitespace();
+            self.skip_whitespace_inline();
             if self.ch == Some('/') && self.peek_char() == Some('/') {
                 self.skip_comment();
                 continue;
@@ -172,6 +243,13 @@ impl<'a> Lexer<'a> {
         }
 
         let token = match self.ch {
+            Some('\n') => {
+                while self.ch == Some('\n') || self.ch == Some('\r') {
+                    self.read_char();
+                }
+                self.at_line_start = true;
+                return Token::Newline;
+            }
             Some('=') => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
@@ -233,12 +311,9 @@ impl<'a> Lexer<'a> {
             }
             Some('(') => Token::LParen,
             Some(')') => Token::RParen,
-            Some('{') => Token::LBrace,
-            Some('}') => Token::RBrace,
             Some('[') => Token::LBracket,
             Some(']') => Token::RBracket,
             Some(',') => Token::Comma,
-            Some(';') => Token::Semicolon,
             Some('.') => Token::Dot,
             Some(':') => {
                 if self.peek_char() == Some(':') {
@@ -262,7 +337,16 @@ impl<'a> Lexer<'a> {
                 }
             }
             Some(c) => Token::Error(format!("Unexpected character: {}", c)),
-            None => Token::Eof,
+            None => {
+                while self.indent_stack.len() > 1 {
+                    self.indent_stack.pop();
+                    self.pending_tokens.push_back(Token::Dedent);
+                }
+                if let Some(tok) = self.pending_tokens.pop_front() {
+                    return tok;
+                }
+                return Token::Eof;
+            }
         };
 
         self.read_char();
@@ -327,89 +411,69 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_next_token() {
+    fn test_indentation_lexer() {
         let input = r#"
-            // This is a comment
-            let five = 5;
-            let ten = 10;
+let x = 5
+if x > 2:
+    print(x)
+    let y = 10
+else:
+    return 0
+let z = 1
+"#;
 
-            fn add(x, y) {
-                return x + y;
-            }
-
-            let result = add(five, ten);
-            
-            if result >= 15 {
-                print(result);
-            } else {
-                return 0;
-            }
-        "#;
-
+        let mut lexer = LexerIndent::new(input);
+        
         let tests = vec![
             Token::Let,
-            Token::Identifier("five".to_string()),
+            Token::Identifier("x".to_string()),
             Token::Assign,
             Token::Number(5.0),
-            Token::Semicolon,
+            Token::Newline,
             
-            Token::Let,
-            Token::Identifier("ten".to_string()),
-            Token::Assign,
-            Token::Number(10.0),
-            Token::Semicolon,
-
-            Token::Fn,
-            Token::Identifier("add".to_string()),
-            Token::LParen,
-            Token::Identifier("x".to_string()),
-            Token::Comma,
-            Token::Identifier("y".to_string()),
-            Token::RParen,
-            Token::LBrace,
-            Token::Return,
-            Token::Identifier("x".to_string()),
-            Token::Plus,
-            Token::Identifier("y".to_string()),
-            Token::Semicolon,
-            Token::RBrace,
-
-            Token::Let,
-            Token::Identifier("result".to_string()),
-            Token::Assign,
-            Token::Identifier("add".to_string()),
-            Token::LParen,
-            Token::Identifier("five".to_string()),
-            Token::Comma,
-            Token::Identifier("ten".to_string()),
-            Token::RParen,
-            Token::Semicolon,
-
             Token::If,
-            Token::Identifier("result".to_string()),
-            Token::GreaterThanOrEq,
-            Token::Number(15.0),
-            Token::LBrace,
+            Token::Identifier("x".to_string()),
+            Token::GreaterThan,
+            Token::Number(2.0),
+            Token::Colon,
+            Token::Newline,
+            
+            Token::Indent,
             Token::Identifier("print".to_string()),
             Token::LParen,
-            Token::Identifier("result".to_string()),
+            Token::Identifier("x".to_string()),
             Token::RParen,
-            Token::Semicolon,
-            Token::RBrace,
+            Token::Newline,
+            
+            Token::Let,
+            Token::Identifier("y".to_string()),
+            Token::Assign,
+            Token::Number(10.0),
+            Token::Newline,
+            
+            Token::Dedent,
             Token::Else,
-            Token::LBrace,
+            Token::Colon,
+            Token::Newline,
+            
+            Token::Indent,
             Token::Return,
             Token::Number(0.0),
-            Token::Semicolon,
-            Token::RBrace,
+            Token::Newline,
+            
+            Token::Dedent,
+            Token::Let,
+            Token::Identifier("z".to_string()),
+            Token::Assign,
+            Token::Number(1.0),
+            Token::Newline,
+            
             Token::Eof,
         ];
 
-        let mut lexer = Lexer::new(input);
-
-        for expected_token in tests {
-            let tok = lexer.next_token();
-            assert_eq!(tok, expected_token);
+        for expected in tests {
+            let t = lexer.next_token();
+            assert_eq!(t, expected);
         }
     }
 }

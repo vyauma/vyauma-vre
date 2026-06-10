@@ -3,7 +3,6 @@
 //! Minimal command-line interface to execute Vyauma bytecode.
 
 use std::env;
-use std::fs;
 use std::process;
 
 use vre_core::config::VreConfig;
@@ -24,27 +23,27 @@ fn main() {
     let input_path = &args[1];
 
     let (instructions, constants, native_imports) = if input_path.ends_with(".vym") {
-        let source = match fs::read_to_string(input_path) {
+        let source = match vre_core::pal::get_pal().read_to_string(std::path::Path::new(input_path)) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Error: failed to read source file: {}", e);
+                vre_core::pal::get_pal().eprintln(&format!("Error: failed to read source file: {}", e));
                 process::exit(1);
             }
         };
         let path = std::path::Path::new(input_path);
         let base_path = path.parent().unwrap_or(std::path::Path::new("."));
-        match vre_compiler::compile(&source, Some(base_path)) {
+        match vre_compiler::compile(&source, input_path, Some(base_path)) {
             Ok(compiled) => (compiled.instructions, compiled.constants, compiled.native_imports),
             Err(e) => {
-                eprintln!("Compile Error: {}", e);
+                render_diagnostic(&source, input_path, &e);
                 process::exit(1);
             }
         }
     } else {
-        let bytes = match fs::read(input_path) {
+        let bytes = match std::fs::read(input_path) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("Error: failed to read bytecode file: {}", e);
+                vre_core::pal::get_pal().eprintln(&format!("Error: failed to read bytecode file: {}", e));
                 process::exit(1);
             }
         };
@@ -52,7 +51,7 @@ fn main() {
         let loaded = match BytecodeLoader::load(&bytes) {
             Ok(bc) => bc,
             Err(e) => {
-                eprintln!("Error: invalid bytecode: {}", e);
+                vre_core::pal::get_pal().eprintln(&format!("Error: invalid bytecode: {}", e));
                 process::exit(1);
             }
         };
@@ -77,13 +76,13 @@ fn main() {
     let mut vm = match VirtualMachine::new(config, instructions, constants, native_imports, capabilities) {
         Ok(vm) => vm,
         Err(e) => {
-            eprintln!("VM Init Error: {}", e);
+            vre_core::pal::get_pal().eprintln(&format!("VM Init Error: {}", e));
             process::exit(1);
         }
     };
 
     if let Err(e) = vm.execute() {
-        eprintln!("Runtime error: {}", e);
+        vre_core::pal::get_pal().eprintln(&format!("Runtime error: {}", e));
         process::exit(1);
     }
 }
@@ -93,4 +92,46 @@ fn print_usage(program_name: &str) {
     println!("Usage:");
     println!("  {} <file.vbc>   - Execute compiled bytecode", program_name);
     println!("  {} <file.vym>    - Compile and execute Vyauma source", program_name);
+}
+
+/// Renders a compiler error with a visual `^` pointer to the exact location.
+///
+/// Error strings with source location have the format: `[line:col] message`
+/// e.g. `[5:12] Expected Colon, got Identifier("x")`
+///
+/// For type errors (no span prefix), prints a plain error with a hint.
+fn render_diagnostic(source: &str, filename: &str, error: &str) {
+    let pal = vre_core::pal::get_pal();
+
+    // Try to parse a [line:col] prefix from the error string.
+    // Pattern: starts with '[', then digits, ':', digits, ']'
+    if error.starts_with('[') {
+        if let Some(close) = error.find(']') {
+            let span_part = &error[1..close];
+            let rest = error[close + 1..].trim();
+            let parts: Vec<&str> = span_part.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                if let (Ok(line_num), Ok(col_num)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>()) {
+                    let lines: Vec<&str> = source.lines().collect();
+                    let source_line = if line_num > 0 && line_num <= lines.len() {
+                        lines[line_num - 1]
+                    } else {
+                        ""
+                    };
+                    let padding = " ".repeat(col_num.saturating_sub(1));
+                    pal.eprintln(&format!("\nerror[E]: {}", rest));
+                    pal.eprintln(&format!("  --> {}:{}:{}", filename, line_num, col_num));
+                    pal.eprintln(&format!("   |"));
+                    pal.eprintln(&format!("{:>3} | {}", line_num, source_line));
+                    pal.eprintln(&format!("   | {}^", padding));
+                    pal.eprintln(&format!("   |"));
+                    return;
+                }
+            }
+        }
+    }
+
+    // Fallback: plain error (type errors, etc.)
+    pal.eprintln(&format!("\nerror: {}", error));
+    pal.eprintln(&format!("  --> {}", filename));
 }
