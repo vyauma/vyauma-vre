@@ -755,7 +755,7 @@ impl VirtualMachine {
                     0x06 => {
                         // sleep(ms)
                         let ms = self.pop_number()? as u64;
-                        std::thread::sleep(std::time::Duration::from_millis(ms));
+                        crate::pal::get_pal().sleep_ms(ms);
                         self.stack.push(Value::Float64(0.0))?;
                         Ok(())
                     }
@@ -775,7 +775,7 @@ impl VirtualMachine {
                         
                         let filename_val = self.stack.pop()?;
                         if let Value::String(filename) = filename_val {
-                            match std::fs::OpenOptions::new().read(true).write(true).create(true).open(&filename) {
+                            match crate::pal::get_pal().open_file(std::path::Path::new(&filename)) {
                                 Ok(file) => {
                                     let fd = self.next_fd;
                                     self.next_fd += 1;
@@ -797,9 +797,11 @@ impl VirtualMachine {
                         let port = self.pop_number()? as u16;
                         let host_val = self.stack.pop()?;
                         if let Value::String(host) = host_val {
-                            let addr: SocketAddr = format!("{}:{}", host, port).parse().unwrap();
-                                match TcpStream::connect(addr) {
-                                Ok(mut stream) => {
+                            let addr = format!("{}:{}", host, port);
+                            match crate::pal::get_pal().tcp_connect(&addr) {
+                                Ok(std_stream) => {
+                                    std_stream.set_nonblocking(true).map_err(|_| VreError::RuntimeFault)?;
+                                    let mut stream = mio::net::TcpStream::from_std(std_stream);
                                     let fd = self.next_fd;
                                     self.next_fd += 1;
                                     if let Err(_) = self.poll.registry().register(&mut stream, Token(fd), Interest::READABLE | Interest::WRITABLE) {
@@ -821,9 +823,11 @@ impl VirtualMachine {
                         self.capabilities.require(&cap)?;
 
                         let port = self.pop_number()? as u16;
-                        let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-                        match mio::net::TcpListener::bind(addr) {
-                            Ok(mut listener) => {
+                        let addr = format!("127.0.0.1:{}", port);
+                        match crate::pal::get_pal().tcp_bind(&addr) {
+                            Ok(std_listener) => {
+                                std_listener.set_nonblocking(true).map_err(|_| VreError::RuntimeFault)?;
+                                let mut listener = mio::net::TcpListener::from_std(std_listener);
                                 let fd = self.next_fd;
                                 self.next_fd += 1;
                                 if let Err(_) = self.poll.registry().register(&mut listener, Token(fd), Interest::READABLE) {

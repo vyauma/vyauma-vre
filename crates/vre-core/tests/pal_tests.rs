@@ -87,6 +87,24 @@ impl PlatformAbstractionLayer for MockPal {
     fn current_time_millis(&self) -> u64 {
         1000
     }
+
+    fn open_file(&self, _path: &Path) -> Result<std::fs::File, String> { Err("Mock open_file".to_string()) }
+    fn sleep_ms(&self, _ms: u64) {}
+    fn rename_file(&self, _from: &Path, _to: &Path) -> Result<(), String> { Ok(()) }
+    fn copy_file(&self, _from: &Path, _to: &Path) -> Result<u64, String> { Ok(0) }
+    fn get_env_var(&self, _key: &str) -> Option<String> { None }
+    fn set_env_var(&self, _key: &str, _value: &str) {}
+    fn get_all_env_vars(&self) -> HashMap<String, String> { HashMap::new() }
+    fn get_system_info(&self) -> HashMap<String, String> { HashMap::new() }
+    fn spawn_process(&self, _command: &str, _args: &[&str]) -> Result<u32, String> { Ok(0) }
+    fn kill_process(&self, _pid: u32) -> Result<(), String> { Ok(()) }
+    fn tcp_connect(&self, _addr: &str) -> Result<std::net::TcpStream, String> { Err("Mock tcp_connect".to_string()) }
+    fn tcp_bind(&self, _addr: &str) -> Result<std::net::TcpListener, String> { Err("Mock tcp_bind".to_string()) }
+    fn udp_bind(&self, _addr: &str) -> Result<std::net::UdpSocket, String> { Err("Mock udp_bind".to_string()) }
+    fn resolve_dns(&self, _hostname: &str) -> Result<Vec<std::net::IpAddr>, String> { Err("Mock resolve_dns".to_string()) }
+    fn load_library(&self, _path: &str) -> Result<usize, String> { Err("Mock".to_string()) }
+    fn resolve_symbol(&self, _lib: usize, _sym: &str) -> Result<usize, String> { Err("Mock".to_string()) }
+    fn unload_library(&self, _lib: usize) -> Result<(), String> { Ok(()) }
 }
 
 #[test]
