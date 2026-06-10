@@ -517,6 +517,24 @@ impl Compiler {
                         self.emit_opcode(OpCode::Syscall);
                         self.emit_u8(0x06);
                     }
+                    "sleep_async" => {
+                        self.compile_expression(args[0].clone())?;
+                        self.emit_opcode(OpCode::Syscall);
+                        self.emit_u8(0x08);
+                    }
+                    "await" => {
+                        self.compile_expression(args[0].clone())?;
+                        self.emit_opcode(OpCode::Await);
+                    }
+                    "spawn" => {
+                        if let Expr::Identifier(func_name, _) = &args[0] {
+                            self.emit_opcode(OpCode::Spawn);
+                            self.unresolved_calls.push((self.instructions.len(), func_name.clone(), 0));
+                            self.emit_u32(0);
+                        } else {
+                            return Err("spawn expects a function identifier".to_string());
+                        }
+                    }
                     "gc" => {
                         self.emit_opcode(OpCode::Syscall);
                         self.emit_u8(0x07);

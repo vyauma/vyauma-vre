@@ -131,7 +131,26 @@ impl VirtualMachine {
     /// Execute bytecode until halt or error
     pub fn execute(&mut self) -> VreResult<()> {
         let mut next_gc_threshold = 1024;
-        while !self.halted && self.ip < self.instructions.len() {
+        while !self.halted {
+            self.scheduler.check_timers();
+
+            if self.current_task_id == u64::MAX {
+                if !self.resume_next_task() {
+                    if self.scheduler.has_active_tasks() {
+                        let timeout = self.scheduler.next_timer_timeout();
+                        if let Err(e) = self.poll.poll(&mut self.events, timeout) {
+                            return Err(VreError::NativeFunctionError(e.to_string()));
+                        }
+                        self.scheduler.check_timers();
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            if self.ip >= self.instructions.len() { break; }
+
             if let Err(err) = self.step() {
                 if self.exception_handlers.is_empty() {
                     return Err(err);
@@ -140,9 +159,9 @@ impl VirtualMachine {
                     self.execute_throw(Value::String(err_str))?;
                 }
             }
+
             if self.heap.live_objects > next_gc_threshold {
                 self.gc()?;
-                // Double the threshold if we couldn't free enough to get under it
                 if self.heap.live_objects > next_gc_threshold / 2 {
                     next_gc_threshold *= 2;
                 }
@@ -184,7 +203,7 @@ impl VirtualMachine {
             self.call_stack = std::mem::take(&mut task.call_stack);
             true
         } else {
-            self.current_task_id = 0;
+            self.current_task_id = u64::MAX;
             false
         }
     }
@@ -455,14 +474,24 @@ impl VirtualMachine {
                     }
                     None => {
                         // Return from top-level — task complete!
-                        if self.resume_next_task() {
-                            // Another task took over
-                            Ok(())
-                        } else {
-                            // No more tasks, halt the VM
-                            self.halted = true;
-                            Ok(())
+                        let result = self.stack.pop().unwrap_or(Value::Null);
+                        let completed_id = self.current_task_id;
+                        
+                        if let Some(waiters) = self.scheduler.task_waiters.remove(&completed_id) {
+                            for waiter_id in waiters {
+                                if let Some(mut waiter_task) = self.scheduler.blocked_tasks.remove(&waiter_id) {
+                                    // Push the result onto the waiting task's stack
+                                    waiter_task.stack.push(result.clone())?;
+                                    waiter_task.state = crate::scheduler::TaskState::Ready;
+                                    self.scheduler.yield_task(waiter_task);
+                                }
+                            }
                         }
+
+                        if !self.resume_next_task() {
+                            self.current_task_id = u64::MAX;
+                        }
+                        Ok(())
                     }
                 }
             }
@@ -485,16 +514,27 @@ impl VirtualMachine {
             }
 
             OpCode::Await => {
-                // Simplified Await: Just act as a yield for now
-                // In a robust implementation, this would track the target task ID 
-                // and block the current task until the target completes.
-                let _target_id = self.stack.pop()?;
-                self.yield_current_task();
+                let target_id_val = self.stack.pop()?;
+                let target_id = match target_id_val {
+                    Value::Int64(id) => id as u64,
+                    Value::Int32(id) => id as u64,
+                    Value::Float64(id) => id as u64,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+                
+                let task = Task {
+                    id: self.current_task_id,
+                    ip: self.ip,
+                    stack: std::mem::replace(&mut self.stack, Stack::new(0)),
+                    call_stack: std::mem::take(&mut self.call_stack),
+                    state: crate::scheduler::TaskState::Blocked,
+                };
+                self.scheduler.await_task(task, target_id);
+                self.current_task_id = u64::MAX;
+                
                 if !self.resume_next_task() {
-                    self.resume_next_task();
+                    // The event loop in execute() will pick up if nothing is ready
                 }
-                // Push placeholder result
-                self.stack.push(Value::Null)?;
                 Ok(())
             }
 
@@ -796,6 +836,25 @@ impl VirtualMachine {
                         let objects_after = self.heap.live_objects;
                         let reclaimed = objects_before.saturating_sub(objects_after);
                         self.stack.push(Value::Float64(reclaimed as f64))?;
+                        Ok(())
+                    }
+                    0x08 => {
+                        // sleep_async(ms)
+                        let ms = self.pop_number()? as u64;
+                        self.stack.push(Value::Float64(0.0))?;
+                        
+                        let task = Task {
+                            id: self.current_task_id,
+                            ip: self.ip,
+                            stack: std::mem::replace(&mut self.stack, Stack::new(0)),
+                            call_stack: std::mem::take(&mut self.call_stack),
+                            state: crate::scheduler::TaskState::Blocked,
+                        };
+                        self.scheduler.schedule_timer(task, ms);
+                        self.current_task_id = u64::MAX;
+                        if !self.resume_next_task() {
+                            // handled by execute loop
+                        }
                         Ok(())
                     }
                     0x10 => {

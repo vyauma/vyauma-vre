@@ -119,3 +119,28 @@ fn main():
     assert!(out.contains("true"));
     let _ = std::fs::remove_dir("test_dir_phase4");
 }
+
+#[test]
+fn test_phase5_async_await() {
+    let script = r#"
+fn worker():
+    sleep_async(50)
+    ffi_console_print("Worker done\n")
+    return 42
+
+fn main():
+    let task_id = spawn(worker)
+    ffi_console_print("Spawned task\n")
+    let res = await(task_id)
+    ffi_console_print("Result: ")
+    ffi_console_print(res)
+    ffi_console_print("\n")
+"#;
+    let (out, err) = run_script(script, "test_phase5_async_await");
+    if !err.is_empty() {
+        panic!("Error: {}", err);
+    }
+    assert!(out.contains("Spawned task\n"));
+    assert!(out.contains("Worker done\n"));
+    assert!(out.contains("Result: 42\n"));
+}
