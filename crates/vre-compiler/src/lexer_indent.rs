@@ -15,6 +15,7 @@ pub enum Token {
     Catch,
     Throw,
     For,
+    Class,
 
     // Identifiers and Literals
     Identifier(String),
@@ -46,7 +47,10 @@ pub enum Token {
     RParen,
     LBracket,
     RBracket,
+    LBrace,
+    RBrace,
     Comma,
+    Semicolon,
 
     // Indentation Control
     Newline,
@@ -77,6 +81,7 @@ impl Token {
             "catch" => Token::Catch,
             "throw" => Token::Throw,
             "for" => Token::For,
+            "class" => Token::Class,
             _ => Token::Identifier(ident.to_string()),
         }
     }
@@ -313,7 +318,10 @@ impl<'a> LexerIndent<'a> {
             Some(')') => Token::RParen,
             Some('[') => Token::LBracket,
             Some(']') => Token::RBracket,
+            Some('{') => Token::LBrace,
+            Some('}') => Token::RBrace,
             Some(',') => Token::Comma,
+            Some(';') => Token::Semicolon,
             Some('.') => Token::Dot,
             Some(':') => {
                 if self.peek_char() == Some(':') {

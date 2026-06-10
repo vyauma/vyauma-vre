@@ -80,6 +80,8 @@ impl<'a> ParserIndent<'a> {
                 functions.push(self.parse_function()?);
             } else if self.current_token == Token::Struct {
                 structs.push(self.parse_struct_decl()?);
+            } else if self.current_token == Token::Class {
+                classes.push(self.parse_class_decl()?);
             } else {
                 return Err(format!("Unexpected token at top level: {:?}", self.current_token));
             }
@@ -188,6 +190,52 @@ impl<'a> ParserIndent<'a> {
         Ok(Stmt::StructDecl(name, fields))
     }
 
+    fn parse_class_decl(&mut self) -> Result<Stmt, String> {
+        self.next_token(); // move past 'class'
+        let name = match &self.current_token {
+            Token::Identifier(id) => id.clone(),
+            _ => return Err(format!("Expected class name, got {:?}", self.current_token)),
+        };
+
+        self.expect_peek(Token::Colon)?;
+        self.expect_peek(Token::Newline)?;
+        self.expect_peek(Token::Indent)?;
+        
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+
+        self.next_token(); // move into block
+
+        while self.current_token != Token::Dedent && self.current_token != Token::Eof {
+            if self.current_token == Token::Newline {
+                self.next_token();
+                continue;
+            }
+
+            if self.current_token == Token::Fn {
+                methods.push(self.parse_function()?);
+            } else if let Token::Identifier(id) = &self.current_token {
+                let field_name = id.clone();
+                let mut field_type = None;
+                if self.peek_token == Token::Colon {
+                    self.next_token(); // move to colon
+                    self.next_token(); // move to type id
+                    field_type = Some(self.parse_type()?);
+                }
+                fields.push((field_name, field_type));
+            } else {
+                return Err(format!("Expected field or method in class, got {:?}", self.current_token));
+            }
+            self.next_token(); // Move to next field/method or Newline
+        }
+
+        if self.current_token != Token::Dedent {
+            return Err("Expected Dedent at end of class declaration".to_string());
+        }
+
+        Ok(Stmt::ClassDecl(name, fields, methods))
+    }
+
     fn parse_function(&mut self) -> Result<Function, String> {
         // Name
         let name = match &self.peek_token {
@@ -293,7 +341,7 @@ impl<'a> ParserIndent<'a> {
                     self.next_token(); // move to '='
                     self.next_token(); // move to rhs
                     let rhs = self.parse_expression(Precedence::Lowest)?;
-                    if self.peek_token == Token::Newline {
+                    if self.peek_token == Token::Newline || self.peek_token == Token::Semicolon {
                         self.next_token();
                     }
                     match expr {
@@ -309,7 +357,7 @@ impl<'a> ParserIndent<'a> {
                         _ => Err("Invalid assignment target".to_string()),
                     }
                 } else {
-                    if self.peek_token == Token::Newline {
+                    if self.peek_token == Token::Newline || self.peek_token == Token::Semicolon {
                         self.next_token();
                     }
                     Ok(Stmt::Expr(expr))
@@ -337,7 +385,7 @@ impl<'a> ParserIndent<'a> {
 
         let expr = self.parse_expression(Precedence::Lowest)?;
         
-        if self.peek_token == Token::Newline {
+        if self.peek_token == Token::Newline || self.peek_token == Token::Semicolon {
             self.next_token();
         }
 
@@ -382,7 +430,7 @@ impl<'a> ParserIndent<'a> {
         
         let expr = self.parse_expression(Precedence::Lowest)?;
         
-        if self.peek_token == Token::Newline {
+        if self.peek_token == Token::Newline || self.peek_token == Token::Semicolon {
             self.next_token();
         }
         
@@ -400,7 +448,7 @@ impl<'a> ParserIndent<'a> {
 
         let expr = self.parse_expression(Precedence::Lowest)?;
 
-        if self.peek_token == Token::Newline {
+        if self.peek_token == Token::Newline || self.peek_token == Token::Semicolon {
             self.next_token();
         }
 
@@ -424,7 +472,7 @@ impl<'a> ParserIndent<'a> {
 
         let value = self.parse_expression(Precedence::Lowest)?;
 
-        if self.peek_token == Token::Newline {
+        if self.peek_token == Token::Newline || self.peek_token == Token::Semicolon {
             self.next_token();
         }
 
@@ -432,13 +480,13 @@ impl<'a> ParserIndent<'a> {
     }
 
     fn parse_return_statement(&mut self) -> Result<Stmt, String> {
-        if self.peek_token == Token::Newline {
+        if self.peek_token == Token::Newline || self.peek_token == Token::Semicolon {
             self.next_token();
             Ok(Stmt::Return(None))
         } else {
             self.next_token();
             let expr = self.parse_expression(Precedence::Lowest)?;
-            if self.peek_token == Token::Newline {
+            if self.peek_token == Token::Newline || self.peek_token == Token::Semicolon {
                 self.next_token();
             }
             Ok(Stmt::Return(Some(expr)))
@@ -482,31 +530,41 @@ impl<'a> ParserIndent<'a> {
     }
 
     fn parse_for_statement(&mut self) -> Result<Stmt, String> {
-        // Python style: for x in y:
-        // C style: for let i = 0; i < 10; i = i + 1:
-        // We will keep C-style expressions for simplicity in AST mapping for now, but use newline/indent for block.
         self.next_token(); // move past 'for'
         
         let init = self.parse_statement()?; 
-        // parse_statement might consume newline. But we expect a condition.
-        // Actually, Python style `for` uses `in`. If we enforce static typing and keep AST, let's keep the C-style header.
-        // Wait, AST requires For(Box<Stmt>, Expr, Box<Stmt>, Block). 
-        // Let's assume syntax: `for let i = 0; i < 10; i = i + 1:`
-        // Semicolons inside `for` header are still needed for C-style loops if we use them.
-        // In python style, we might need a parser change to map `for x in arr:` to the C-style AST.
-        // Since the prompt is layout parsing, we'll keep the AST mapping simple.
+        if self.current_token == Token::Semicolon {
+            self.next_token(); // move to condition
+        } else {
+            return Err("Expected ';' after for loop init".to_string());
+        }
         
-        // This is a simplification:
-        // The LexerIndent doesn't emit semicolons. It emits Error if it sees one.
-        // We must change the syntax of for loops, e.g., `for i in range(0, 10):`
-        // But `range` isn't built into VRE types.
-        return Err("For loops are not fully implemented in Indent Parser yet".to_string());
+        let condition = self.parse_expression(Precedence::Lowest)?;
+        self.expect_peek(Token::Semicolon)?; 
+        
+        self.next_token(); // move to increment
+        let increment = self.parse_statement()?;
+        
+        if self.peek_token == Token::Colon {
+            self.expect_peek(Token::Colon)?;
+        } else if self.current_token == Token::Colon {
+            // Already at colon
+        } else {
+            return Err("Expected ':' after for loop header".to_string());
+        }
+        
+        self.expect_peek(Token::Newline)?;
+        self.expect_peek(Token::Indent)?;
+        
+        let body = self.parse_block()?;
+
+        Ok(Stmt::For(Box::new(init), condition, Box::new(increment), body))
     }
 
     fn parse_expression(&mut self, precedence: Precedence) -> Result<Expr, String> {
         let mut left = self.parse_prefix()?;
 
-        while self.peek_token != Token::Newline && self.peek_token != Token::Eof && precedence < self.peek_precedence() {
+        while self.peek_token != Token::Newline && self.peek_token != Token::Semicolon && self.peek_token != Token::Eof && precedence < self.peek_precedence() {
             self.next_token();
             left = self.parse_infix(left)?;
         }
@@ -545,9 +603,12 @@ impl<'a> ParserIndent<'a> {
             Token::LBracket => {
                 self.parse_array_literal()
             }
-            // Dictionary literal needs {}. LexerIndent currently doesn't emit LBrace/RBrace!
-            // Wait, we need {} for dicts and new struct. We removed `{` and `}` from Token enum.
-            // That was a mistake! We need braces for dict literals and structs!
+            Token::LBrace => {
+                self.parse_dict_literal()
+            }
+            Token::New => {
+                self.parse_new_expression()
+            }
             _ => Err(format!("No prefix parse function for {:?}", self.current_token)),
         }
     }
@@ -566,6 +627,95 @@ impl<'a> ParserIndent<'a> {
         }
         self.expect_peek(Token::RBracket)?;
         Ok(Expr::ArrayLiteral(elements))
+    }
+
+    fn parse_dict_literal(&mut self) -> Result<Expr, String> {
+        let mut elements = Vec::new();
+        if self.peek_token != Token::RBrace {
+            self.next_token(); // Move to first key
+            let key = self.parse_expression(Precedence::Lowest)?;
+            
+            self.expect_peek(Token::Colon)?;
+            self.next_token(); // Move to value
+            
+            let val = self.parse_expression(Precedence::Lowest)?;
+            elements.push((key, val));
+
+            while self.peek_token == Token::Comma {
+                self.next_token(); // consume comma
+                self.next_token(); // move to key
+                let key = self.parse_expression(Precedence::Lowest)?;
+                
+                self.expect_peek(Token::Colon)?;
+                self.next_token(); // Move to value
+                let val = self.parse_expression(Precedence::Lowest)?;
+                elements.push((key, val));
+            }
+        }
+        self.expect_peek(Token::RBrace)?;
+        Ok(Expr::DictLiteral(elements))
+    }
+
+    fn parse_new_expression(&mut self) -> Result<Expr, String> {
+        self.next_token(); // Move past 'new'
+        let name = match &self.current_token {
+            Token::Identifier(id) => id.clone(),
+            _ => return Err("Expected type name after new".to_string()),
+        };
+        
+        if self.peek_token == Token::LParen {
+            self.next_token(); // move to '('
+            self.next_token(); // move inside '('
+            
+            let mut args = Vec::new();
+            if self.current_token != Token::RParen {
+                args.push(self.parse_expression(Precedence::Lowest)?);
+
+                while self.peek_token == Token::Comma {
+                    self.next_token(); // consume comma
+                    self.next_token(); // move to next expr
+                    args.push(self.parse_expression(Precedence::Lowest)?);
+                }
+            }
+            if self.peek_token == Token::RParen {
+                self.next_token(); // consume ')'
+            } else if self.current_token != Token::RParen {
+                return Err("Expected ')'".to_string());
+            }
+            
+            Ok(Expr::NewClass(name, args))
+        } else {
+            self.expect_peek(Token::LBrace)?;
+            let mut fields = Vec::new();
+
+            if self.peek_token != Token::RBrace {
+                self.next_token(); // Move to first key
+                let key = match &self.current_token {
+                    Token::Identifier(id) => id.clone(),
+                    _ => return Err("Expected field name".to_string()),
+                };
+                self.expect_peek(Token::Colon)?;
+                self.next_token(); // Move to value
+                let val = self.parse_expression(Precedence::Lowest)?;
+                fields.push((key, val));
+
+                while self.peek_token == Token::Comma {
+                    self.next_token(); // consume comma
+                    self.next_token(); // move to key
+                    let key = match &self.current_token {
+                        Token::Identifier(id) => id.clone(),
+                        _ => return Err("Expected field name".to_string()),
+                    };
+                    self.expect_peek(Token::Colon)?;
+                    self.next_token();
+                    let val = self.parse_expression(Precedence::Lowest)?;
+                    fields.push((key, val));
+                }
+            }
+            self.expect_peek(Token::RBrace)?;
+
+            Ok(Expr::StructInit(name, fields))
+        }
     }
 
     fn parse_call_expression(&mut self, func_name: String) -> Result<Expr, String> {
@@ -711,5 +861,48 @@ fn main():
         let main_fn = &program.functions[0];
         assert_eq!(main_fn.name, "main");
         assert_eq!(main_fn.body.len(), 3); // let, let, if
+    }
+
+    #[test]
+    fn test_parse_for_loop_indent() {
+        let input = r#"
+fn run_loop():
+    for let i = 0; i < 10; i = i + 1:
+        print(i)
+"#;
+        let lexer = LexerIndent::new(input);
+        let mut parser = ParserIndent::new(lexer);
+        let program = parser.parse_program().unwrap();
+        assert_eq!(program.functions.len(), 1);
+        let body = &program.functions[0].body;
+        assert_eq!(body.len(), 1);
+        match &body[0] {
+            Stmt::For(_, _, _, _) => {}
+            _ => panic!("Expected For statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_class_decl_indent() {
+        let input = r#"
+class Person:
+    name: String
+    age: Int32
+    
+    fn greet():
+        print("hello")
+"#;
+        let lexer = LexerIndent::new(input);
+        let mut parser = ParserIndent::new(lexer);
+        let program = parser.parse_program().unwrap();
+        assert_eq!(program.classes.len(), 1);
+        match &program.classes[0] {
+            Stmt::ClassDecl(name, fields, methods) => {
+                assert_eq!(name, "Person");
+                assert_eq!(fields.len(), 2);
+                assert_eq!(methods.len(), 1);
+            }
+            _ => panic!("Expected ClassDecl"),
+        }
     }
 }
