@@ -202,7 +202,7 @@ impl Compiler {
                 self.emit_opcode(OpCode::StoreProperty);
                 self.emit_u16(prop_idx);
             }
-            Stmt::StructDecl(_, _) | Stmt::ClassDecl(_, _, _) => {
+            Stmt::StructDecl(..) | Stmt::ClassDecl(..) => {
                 // Duck-typed, no runtime representation needed
             }
             Stmt::Expr(expr) => {

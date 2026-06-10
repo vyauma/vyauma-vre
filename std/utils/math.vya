@@ -1,17 +1,17 @@
 // Math utilities wrapping native FFI
 
-fn pi() -> Float64 {
+export fn pi() -> Float64 {
     return ffi_math_pi();
 }
 
-fn sqrt(x: Float64) -> Float64 {
+export fn sqrt(x: Float64) -> Float64 {
     return ffi_math_sqrt(x);
 }
 
-fn pow(base: Float64, exp: Float64) -> Float64 {
+export fn pow(base: Float64, exp: Float64) -> Float64 {
     return ffi_math_pow(base, exp);
 }
 
-fn log(x: Float64) -> Float64 {
+export fn log(x: Float64) -> Float64 {
     return ffi_math_log(x);
 }

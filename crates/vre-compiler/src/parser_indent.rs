@@ -82,6 +82,27 @@ impl<'a> ParserIndent<'a> {
                 structs.push(self.parse_struct_decl()?);
             } else if self.current_token.kind == TokenKind::Class {
                 classes.push(self.parse_class_decl()?);
+            } else if self.current_token.kind == TokenKind::Export {
+                self.next_token();
+                if self.current_token.kind == TokenKind::Fn {
+                    let mut func = self.parse_function()?;
+                    func.is_exported = true;
+                    functions.push(func);
+                } else if self.current_token.kind == TokenKind::Struct {
+                    let mut s = self.parse_struct_decl()?;
+                    if let Stmt::StructDecl(_, _, ref mut exp) = s {
+                        *exp = true;
+                    }
+                    structs.push(s);
+                } else if self.current_token.kind == TokenKind::Class {
+                    let mut c = self.parse_class_decl()?;
+                    if let Stmt::ClassDecl(_, _, _, ref mut exp) = c {
+                        *exp = true;
+                    }
+                    classes.push(c);
+                } else {
+                    return Err(format!("Unexpected token after export: {:?}", self.current_token));
+                }
             } else {
                 return Err(format!("Unexpected token at top level: {:?}", self.current_token));
             }
@@ -187,7 +208,7 @@ impl<'a> ParserIndent<'a> {
             }
         }
         self.expect_peek(TokenKind::Dedent)?;
-        Ok(Stmt::StructDecl(name, fields))
+        Ok(Stmt::StructDecl(name, fields, false))
     }
 
     fn parse_class_decl(&mut self) -> Result<Stmt, String> {
@@ -233,7 +254,7 @@ impl<'a> ParserIndent<'a> {
             return Err("Expected Dedent at end of class declaration".to_string());
         }
 
-        Ok(Stmt::ClassDecl(name, fields, methods))
+        Ok(Stmt::ClassDecl(name, fields, methods, false))
     }
 
     fn parse_function(&mut self) -> Result<Function, String> {
@@ -299,6 +320,7 @@ impl<'a> ParserIndent<'a> {
             params,
             return_type,
             body,
+            is_exported: false,
         })
     }
 

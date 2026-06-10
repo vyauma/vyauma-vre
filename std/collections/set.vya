@@ -1,6 +1,6 @@
 import "std/collections/map";
 
-class Set {
+export class Set {
     _map: Any
 
     fn init() {

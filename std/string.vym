@@ -1,8 +1,8 @@
-fn string_len(s: String) -> Float64 { return ffi_string_len(s); }
-fn string_split(s: String, sep: String) -> Any { return ffi_string_split(s, sep); }
-fn string_starts_with(s: String, prefix: String) -> Bool { return ffi_string_starts_with(s, prefix); }
-fn string_contains(s: String, sub: String) -> Bool { return ffi_string_contains(s, sub); }
-fn string_replace(s: String, old: String, new: String) -> String { return ffi_string_replace(s, old, new); }
-fn string_to_lower(s: String) -> String { return ffi_string_to_lower(s); }
-fn string_to_upper(s: String) -> String { return ffi_string_to_upper(s); }
-fn string_trim(s: String) -> String { return ffi_string_trim(s); }
+export fn string_len(s: String) -> Float64 { return ffi_string_len(s); }
+export fn string_split(s: String, sep: String) -> Any { return ffi_string_split(s, sep); }
+export fn string_starts_with(s: String, prefix: String) -> Bool { return ffi_string_starts_with(s, prefix); }
+export fn string_contains(s: String, sub: String) -> Bool { return ffi_string_contains(s, sub); }
+export fn string_replace(s: String, old: String, new: String) -> String { return ffi_string_replace(s, old, new); }
+export fn string_to_lower(s: String) -> String { return ffi_string_to_lower(s); }
+export fn string_to_upper(s: String) -> String { return ffi_string_to_upper(s); }
+export fn string_trim(s: String) -> String { return ffi_string_trim(s); }

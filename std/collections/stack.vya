@@ -1,6 +1,6 @@
 import "std/collections/array";
 
-class Stack {
+export class Stack {
     _items: Any
 
     fn init() {

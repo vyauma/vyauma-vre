@@ -129,7 +129,7 @@ impl TypeChecker {
 
         // Register structs
         for stmt in &program.structs {
-            if let Stmt::StructDecl(name, fields) = stmt {
+            if let Stmt::StructDecl(name, fields, _is_exported) = stmt {
                 let mut field_types = HashMap::new();
                 for (field_name, opt_type) in fields {
                     field_types.insert(field_name.clone(), opt_type.clone().unwrap_or(Type::Any));
@@ -141,7 +141,7 @@ impl TypeChecker {
         // Register classes and move methods to functions
         let classes = std::mem::take(&mut program.classes);
         for class_decl in classes {
-            if let Stmt::ClassDecl(name, fields, methods) = class_decl {
+            if let Stmt::ClassDecl(name, fields, methods, is_exported) = class_decl {
                 let mut class_fields = Vec::new();
                 for (field_name, opt_type) in &fields {
                     class_fields.push((field_name.clone(), opt_type.clone().unwrap_or(Type::Any)));
@@ -171,7 +171,7 @@ impl TypeChecker {
                     
                     program.functions.push(method);
                 }
-                program.classes.push(Stmt::ClassDecl(name, fields, Vec::new()));
+                program.classes.push(Stmt::ClassDecl(name, fields, Vec::new(), is_exported));
             }
         }
 
@@ -343,7 +343,7 @@ impl TypeChecker {
                 let _ty = self.get_expr_type(expr)?;
                 // Allow throwing any type for now
             }
-            Stmt::StructDecl(_, _) => {}
+            Stmt::StructDecl(_, _, _) => {}
             Stmt::AssignProperty(obj_expr, prop_name, rhs) => {
                 let obj_ty = self.get_expr_type(obj_expr)?;
                 let rhs_ty = self.get_expr_type(rhs)?;

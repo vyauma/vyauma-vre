@@ -1,2 +1,2 @@
-fn crypto_random_bytes(len: Float64) -> Any { return ffi_crypto_random_bytes(len); }
-fn crypto_sha256(data: String) -> String { return ffi_crypto_sha256(data); }
+export fn crypto_random_bytes(len: Float64) -> Any { return ffi_crypto_random_bytes(len); }
+export fn crypto_sha256(data: String) -> String { return ffi_crypto_sha256(data); }

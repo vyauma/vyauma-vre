@@ -1,6 +1,6 @@
 import "std/collections/array";
 
-class Queue {
+export class Queue {
     _items: Any
 
     fn init() {

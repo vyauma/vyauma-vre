@@ -1,6 +1,6 @@
-fn fs_exists(path: String) -> Bool { return ffi_fs_exists(path); }
-fn fs_delete(path: String) -> Bool { return ffi_fs_delete(path); }
-fn fs_size(path: String) -> Float64 { return ffi_fs_size(path); }
-fn fs_read_file(path: String) -> String { return ffi_fs_read_file(path); }
-fn fs_write_file(path: String, content: String) -> Bool { return ffi_fs_write_file(path, content); }
-fn fs_append_file(path: String, content: String) -> Bool { return ffi_fs_append_file(path, content); }
+export fn fs_exists(path: String) -> Bool { return ffi_fs_exists(path); }
+export fn fs_delete(path: String) -> Bool { return ffi_fs_delete(path); }
+export fn fs_size(path: String) -> Float64 { return ffi_fs_size(path); }
+export fn fs_read_file(path: String) -> String { return ffi_fs_read_file(path); }
+export fn fs_write_file(path: String, content: String) -> Bool { return ffi_fs_write_file(path, content); }
+export fn fs_append_file(path: String, content: String) -> Bool { return ffi_fs_append_file(path, content); }

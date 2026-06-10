@@ -178,3 +178,71 @@ fn main():
     assert!(!err.contains("capability not granted"));
     assert!(out.contains("Executed"));
 }
+
+#[test]
+fn test_phase7_export_encapsulation() {
+    let script_a = r#"
+fn secret_func() {
+    return 42
+}
+
+export fn public_func() {
+    return secret_func()
+}
+"#;
+    let script_b = r#"
+import "test_export_a"
+
+fn main() {
+    // Try to call the private function (should fail to compile)
+    ffi_console_print("Trying secret: " + test_export_a__secret_func())
+}
+"#;
+    let script_c = r#"
+import "test_export_a"
+
+fn main() {
+    // Try to call the public function (should succeed)
+    ffi_console_print("Public says: " + test_export_a__public_func())
+}
+"#;
+
+    let dir = std::env::temp_dir().join("vre_phase7_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    
+    let path_a = dir.join("test_export_a.vya");
+    let path_b = dir.join("test_export_b.vya");
+    let path_c = dir.join("test_export_c.vya");
+    
+    std::fs::write(&path_a, script_a).unwrap();
+    std::fs::write(&path_b, script_b).unwrap();
+    std::fs::write(&path_c, script_c).unwrap();
+
+    let exe_path = env!("CARGO_BIN_EXE_vre");
+    
+    // Run B (which tries to call private func)
+    let output_b = std::process::Command::new(exe_path)
+        .arg(&path_b)
+        .arg("--allow-all")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    
+    let err_b = String::from_utf8_lossy(&output_b.stderr).to_lowercase();
+    let out_b = String::from_utf8_lossy(&output_b.stdout).to_lowercase();
+    assert!(!output_b.status.success());
+    // The type checker should throw an unresolved function error because `test_export_a__secret_func` doesn't exist
+    assert!(err_b.contains("unresolved") || out_b.contains("unresolved") || err_b.contains("undefined") || out_b.contains("undefined"), "Expected undefined/unresolved function error, got stderr: '{}' and stdout: '{}'", err_b, out_b);
+
+    // Run C (which calls public func)
+    let output_c = std::process::Command::new(exe_path)
+        .arg(&path_c)
+        .arg("--allow-all")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+        
+    let out_c = String::from_utf8_lossy(&output_c.stdout);
+    assert!(output_c.status.success(), "Expected successful execution, got error: {}", String::from_utf8_lossy(&output_c.stderr));
+    assert!(out_c.contains("Public says: 42"));
+}

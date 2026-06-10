@@ -1,5 +1,5 @@
-fn array_len(arr: Any) -> Float64 { return ffi_array_len(arr); }
-fn array_push(arr: Any, val: Any) { ffi_array_push(arr, val); }
-fn array_pop(arr: Any) -> Any { return ffi_array_pop(arr); }
-fn array_get(arr: Any, index: Float64) -> Any { return ffi_array_get(arr, index); }
-fn array_set(arr: Any, index: Float64, val: Any) { ffi_array_set(arr, index, val); }
+export fn array_len(arr: Any) -> Float64 { return ffi_array_len(arr); }
+export fn array_push(arr: Any, val: Any) { ffi_array_push(arr, val); }
+export fn array_pop(arr: Any) -> Any { return ffi_array_pop(arr); }
+export fn array_get(arr: Any, index: Float64) -> Any { return ffi_array_get(arr, index); }
+export fn array_set(arr: Any, index: Float64, val: Any) { ffi_array_set(arr, index, val); }

@@ -55,12 +55,12 @@ pub enum Stmt {
     If(Expr, Block, Option<Block>),
     While(Expr, Block),
     Return(Option<Expr>),
-    StructDecl(String, Vec<(String, Option<Type>)>),
+    StructDecl(String, Vec<(String, Option<Type>)>, bool),
     AssignProperty(Box<Expr>, String, Expr),
     TryCatch(Block, String, Block),
     Throw(Expr),
     For(Box<Stmt>, Expr, Box<Stmt>, Block),
-    ClassDecl(String, Vec<(String, Option<Type>)>, Vec<Function>),
+    ClassDecl(String, Vec<(String, Option<Type>)>, Vec<Function>, bool),
 }
 
 pub type Block = Vec<Stmt>;
@@ -71,6 +71,7 @@ pub struct Function {
     pub params: Vec<(String, Option<Type>)>,
     pub return_type: Option<Type>,
     pub body: Block,
+    pub is_exported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -124,19 +124,28 @@ fn resolve_import_path(path: &str) -> String {
 /// Name-mangling pass: prefixes all function names in `program` with
 /// `namespace__` and rewrites all intra-module `Expr::Call` references
 /// so they continue to point to the now-renamed functions.
+/// Non-exported functions are mangled with `__private_namespace__` to prevent external access.
 fn mangle_program(program: &mut Program, namespace: &str) {
-    let local_fn_names: HashSet<String> =
-        program.functions.iter().map(|f| f.name.clone()).collect();
+    // Map of local function name -> is_exported
+    let local_fns: std::collections::HashMap<String, bool> = program
+        .functions
+        .iter()
+        .map(|f| (f.name.clone(), f.is_exported))
+        .collect();
 
     for func in &mut program.functions {
-        func.name = format!("{}__{}", namespace, func.name);
+        if func.is_exported {
+            func.name = format!("{}__{}", namespace, func.name);
+        } else {
+            func.name = format!("__private_{}__{}", namespace, func.name);
+        }
         for stmt in &mut func.body {
-            mangle_stmt(stmt, namespace, &local_fn_names);
+            mangle_stmt(stmt, namespace, &local_fns);
         }
     }
 }
 
-fn mangle_stmt(stmt: &mut Stmt, namespace: &str, local_fns: &HashSet<String>) {
+fn mangle_stmt(stmt: &mut Stmt, namespace: &str, local_fns: &std::collections::HashMap<String, bool>) {
     match stmt {
         Stmt::Let(_, _, expr) => mangle_expr(expr, namespace, local_fns),
         Stmt::Assign(_, expr) => mangle_expr(expr, namespace, local_fns),
@@ -184,15 +193,19 @@ fn mangle_stmt(stmt: &mut Stmt, namespace: &str, local_fns: &HashSet<String>) {
                 mangle_stmt(s, namespace, local_fns);
             }
         }
-        Stmt::Return(None) | Stmt::StructDecl(_, _) | Stmt::ClassDecl(_, _, _) => {}
+        Stmt::Return(None) | Stmt::StructDecl(..) | Stmt::ClassDecl(..) => {}
     }
 }
 
-fn mangle_expr(expr: &mut Expr, namespace: &str, local_fns: &HashSet<String>) {
+fn mangle_expr(expr: &mut Expr, namespace: &str, local_fns: &std::collections::HashMap<String, bool>) {
     match expr {
         Expr::Call(name, args, _) => {
-            if local_fns.contains(name.as_str()) {
-                *name = format!("{}__{}", namespace, name);
+            if let Some(&is_exported) = local_fns.get(name) {
+                if is_exported {
+                    *name = format!("{}__{}", namespace, name);
+                } else {
+                    *name = format!("__private_{}__{}", namespace, name);
+                }
             }
             for arg in args {
                 mangle_expr(arg, namespace, local_fns);

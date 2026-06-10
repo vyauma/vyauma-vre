@@ -14,7 +14,7 @@ impl AstOptimizer {
         
         // Also optimize methods inside classes
         for class_decl in &mut program.classes {
-            if let Stmt::ClassDecl(_, _, methods) = class_decl {
+            if let Stmt::ClassDecl(_, _, methods, _) = class_decl {
                 for method in methods {
                     self.optimize_function(method);
                 }
@@ -96,7 +96,7 @@ impl AstOptimizer {
                 self.optimize_block(catch_block);
             }
             Stmt::Expr(expr) => self.optimize_expression(expr),
-            Stmt::StructDecl(_, _) | Stmt::ClassDecl(_, _, _) => {}
+            Stmt::StructDecl(..) | Stmt::ClassDecl(..) => {}
         }
     }
 
