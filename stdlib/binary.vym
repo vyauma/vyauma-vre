@@ -1,0 +1,9 @@
+class Binary {
+    static toBase64(str) {
+        return ffi_base64_encode(str);
+    }
+
+    static fromBase64(str) {
+        return ffi_base64_decode(str);
+    }
+}

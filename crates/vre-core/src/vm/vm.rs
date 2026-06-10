@@ -68,6 +68,7 @@ pub struct VirtualMachine {
     resources: HashMap<usize, Resource>,
     next_fd: usize,
     pub native_functions: Vec<NativeFunction>,
+    pub native_names: Vec<String>,
     poll: Poll,
     events: Events,
     
@@ -91,9 +92,11 @@ impl VirtualMachine {
         capabilities: CapabilityRegistry,
     ) -> Result<Self, String> {
         let mut native_functions = Vec::new();
+        let mut native_names = Vec::new();
         for import in native_imports {
             if let Some(func) = config.ffi_functions.get(&import) {
                 native_functions.push(*func);
+                native_names.push(import);
             } else {
                 return Err(format!("Unresolved FFI native import: {}", import));
             }
@@ -120,6 +123,7 @@ impl VirtualMachine {
             resources: HashMap::new(),
             next_fd: 0,
             native_functions,
+            native_names,
             poll,
             events: Events::with_capacity(128),
             exception_handlers: Vec::new(),
@@ -549,6 +553,27 @@ impl VirtualMachine {
                     args.push(self.stack.pop()?);
                 }
                 args.reverse();
+
+                let func_name = &self.native_names[native_idx];
+                if func_name.starts_with("ffi_fs_") {
+                    if func_name == "ffi_fs_read_file" || func_name == "ffi_fs_exists" || func_name == "ffi_fs_size" {
+                        self.capabilities.require(&Capability::new("fs.read"))?;
+                    } else {
+                        self.capabilities.require(&Capability::new("fs.write"))?;
+                    }
+                } else if func_name.starts_with("ffi_net_") || func_name.starts_with("ffi_http_") || func_name.starts_with("ffi_ws_") {
+                    if func_name == "ffi_net_listen" {
+                        self.capabilities.require(&Capability::new("net.listen"))?;
+                    } else if func_name == "ffi_net_accept" {
+                        self.capabilities.require(&Capability::new("net.accept"))?;
+                    } else {
+                        self.capabilities.require(&Capability::new("net.connect"))?;
+                    }
+                } else if func_name.starts_with("ffi_process_") {
+                    self.capabilities.require(&Capability::new("sys.process"))?;
+                } else if func_name.starts_with("ffi_env_") {
+                    self.capabilities.require(&Capability::new("sys.env"))?;
+                }
 
                 let func = self.native_functions[native_idx];
                 let result = match func(&mut self.heap, args) {

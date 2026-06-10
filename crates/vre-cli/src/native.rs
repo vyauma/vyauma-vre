@@ -1034,5 +1034,139 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Null)
     });
 
-}
+    config.ffi_functions.insert("ffi_array_remove".to_string(), |heap, mut args| {
+        if args.len() != 2 { return Err("ffi_array_remove expects 2 arguments".to_string()); }
+        let idx = match args.pop().unwrap() {
+            num @ _ => num.as_f64().map_err(|_| "Expected number index".to_string())? as usize,
+        };
+        let arr_ref = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Reference(id) => id,
+            _ => return Err("Expected array reference".to_string()),
+        };
+        
+        let obj = heap.get_mut(arr_ref).map_err(|_| "Invalid heap reference".to_string())?;
+        if let vre_core::vm::memory::HeapObject::Array(arr) = obj {
+            if idx < arr.len() {
+                Ok(arr.remove(idx))
+            } else {
+                Ok(vre_core::vm::value::Value::Null)
+            }
+        } else {
+            Err("Reference is not an array".to_string())
+        }
+    });
 
+    // Helper functions for XML/TOML since we can't easily reuse the inner closures of JSON
+    fn build_vyauma(heap: &mut vre_core::vm::memory::Heap, json: &serde_json::Value) -> Result<vre_core::vm::value::Value, String> {
+        match json {
+            serde_json::Value::Null => Ok(vre_core::vm::value::Value::Null),
+            serde_json::Value::Bool(b) => Ok(vre_core::vm::value::Value::Bool(*b)),
+            serde_json::Value::Number(n) => Ok(vre_core::vm::value::Value::Float64(n.as_f64().unwrap_or(0.0))),
+            serde_json::Value::String(s) => Ok(vre_core::vm::value::Value::String(s.clone())),
+            serde_json::Value::Array(arr) => {
+                let mut v_arr = Vec::new();
+                for item in arr { v_arr.push(build_vyauma(heap, item)?); }
+                let obj = vre_core::vm::memory::HeapObject::Array(v_arr);
+                Ok(vre_core::vm::value::Value::Reference(heap.allocate(obj)))
+            }
+            serde_json::Value::Object(obj) => {
+                let mut v_map = std::collections::HashMap::new();
+                for (k, v) in obj { v_map.insert(k.clone(), build_vyauma(heap, v)?); }
+                let h_obj = vre_core::vm::memory::HeapObject::Struct(v_map);
+                Ok(vre_core::vm::value::Value::Reference(heap.allocate(h_obj)))
+            }
+        }
+    }
+
+    fn dump_vyauma(heap: &vre_core::vm::memory::Heap, value: &vre_core::vm::value::Value) -> Result<serde_json::Value, String> {
+        match value {
+            vre_core::vm::value::Value::Null => Ok(serde_json::Value::Null),
+            vre_core::vm::value::Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
+            vre_core::vm::value::Value::String(s) => Ok(serde_json::Value::String(s.clone())),
+            vre_core::vm::value::Value::Float64(n) => {
+                if let Some(num) = serde_json::Number::from_f64(*n) { Ok(serde_json::Value::Number(num)) } else { Err("Invalid number".to_string()) }
+            }
+            vre_core::vm::value::Value::Reference(id) => {
+                let obj = heap.get(*id).map_err(|_| "Invalid heap reference".to_string())?;
+                match obj {
+                    vre_core::vm::memory::HeapObject::Array(arr) => {
+                        let mut j_arr = Vec::new();
+                        for item in arr { j_arr.push(dump_vyauma(heap, item)?); }
+                        Ok(serde_json::Value::Array(j_arr))
+                    }
+                    vre_core::vm::memory::HeapObject::Struct(map) => {
+                        let mut j_map = serde_json::Map::new();
+                        for (k, v) in map { j_map.insert(k.clone(), dump_vyauma(heap, v)?); }
+                        Ok(serde_json::Value::Object(j_map))
+                    }
+                    vre_core::vm::memory::HeapObject::String(s) => Ok(serde_json::Value::String(s.clone())),
+                    _ => Err("Unsupported heap object".to_string()),
+                }
+            }
+            _ => Err("Unsupported type".to_string()),
+        }
+    }
+
+    config.ffi_functions.insert("ffi_toml_parse".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_toml_parse expects 1 argument".to_string()); }
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string".to_string()),
+        };
+        let toml_val: serde_json::Value = toml::from_str(&s).map_err(|e| e.to_string())?;
+        build_vyauma(heap, &toml_val)
+    });
+
+    config.ffi_functions.insert("ffi_toml_stringify".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_toml_stringify expects 1 argument".to_string()); }
+        let val = args.pop().unwrap();
+        let j = dump_vyauma(heap, &val)?;
+        let s = toml::to_string(&j).map_err(|e| e.to_string())?;
+        Ok(vre_core::vm::value::Value::String(s))
+    });
+
+    config.ffi_functions.insert("ffi_xml_parse".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_xml_parse expects 1 argument".to_string()); }
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string".to_string()),
+        };
+        // Use quick-xml de::from_str to map to json value
+        // Note: For simple documents this maps cleanly
+        let xml_val: serde_json::Value = quick_xml::de::from_str(&s).map_err(|e| e.to_string())?;
+        build_vyauma(heap, &xml_val)
+    });
+
+    config.ffi_functions.insert("ffi_xml_stringify".to_string(), |heap, mut args| {
+        if args.len() != 1 { return Err("ffi_xml_stringify expects 1 argument".to_string()); }
+        let val = args.pop().unwrap();
+        let j = dump_vyauma(heap, &val)?;
+        match quick_xml::se::to_string(&j) {
+            Ok(s) => Ok(vre_core::vm::value::Value::String(s)),
+            Err(e) => Err(e.to_string()),
+        }
+    });
+
+    config.ffi_functions.insert("ffi_base64_encode".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_base64_encode expects 1 argument".to_string()); }
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string".to_string()),
+        };
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let b64 = STANDARD.encode(s.as_bytes());
+        Ok(vre_core::vm::value::Value::String(b64))
+    });
+
+    config.ffi_functions.insert("ffi_base64_decode".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_base64_decode expects 1 argument".to_string()); }
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string".to_string()),
+        };
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let bytes = STANDARD.decode(s).map_err(|e| e.to_string())?;
+        let decoded = String::from_utf8(bytes).map_err(|e| e.to_string())?;
+        Ok(vre_core::vm::value::Value::String(decoded))
+    });
+}

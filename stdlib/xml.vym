@@ -1,0 +1,9 @@
+class Xml {
+    static parse(str) {
+        return ffi_xml_parse(str);
+    }
+
+    static stringify(obj) {
+        return ffi_xml_stringify(obj);
+    }
+}

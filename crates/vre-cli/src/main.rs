@@ -20,6 +20,8 @@ fn main() {
     let allow_read = raw_args.iter().any(|a| a == "--allow-read");
     let allow_write = raw_args.iter().any(|a| a == "--allow-write");
     let allow_net = raw_args.iter().any(|a| a == "--allow-net");
+    let allow_env = raw_args.iter().any(|a| a == "--allow-env");
+    let allow_run = raw_args.iter().any(|a| a == "--allow-run");
     let allow_all = raw_args.iter().any(|a| a == "--allow-all");
     
     let args: Vec<&String> = raw_args.iter()
@@ -91,6 +93,12 @@ fn main() {
         capabilities.grant(Capability::new("net.accept"));
         capabilities.grant(Capability::new("net.connect"));
     }
+    if allow_all || allow_env {
+        capabilities.grant(Capability::new("sys.env"));
+    }
+    if allow_all || allow_run {
+        capabilities.grant(Capability::new("sys.process"));
+    }
 
     // Run VM
     let mut vm = match VirtualMachine::new(config, instructions, constants, native_imports, capabilities) {
@@ -131,6 +139,8 @@ fn print_usage(program_name: &str) {
     println!("  --allow-read               - Allow file system read access");
     println!("  --allow-write              - Allow file system write access");
     println!("  --allow-net                - Allow network access");
+    println!("  --allow-env                - Allow environment variables access");
+    println!("  --allow-run                - Allow spawning subprocesses");
     println!("  --allow-all                - Allow all access");
     println!("\nDebug Options:");
     println!("  --check-leaks              - Run and report heap leaks");

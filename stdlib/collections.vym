@@ -1,0 +1,93 @@
+class Stack {
+    __init__() {
+        this.items = [];
+    }
+
+    push(item) {
+        ffi_array_push(this.items, item);
+    }
+
+    pop() {
+        return ffi_array_pop(this.items);
+    }
+
+    peek() {
+        let len = ffi_array_len(this.items);
+        if len > 0 {
+            return ffi_array_get(this.items, len - 1);
+        }
+        return null;
+    }
+
+    is_empty() {
+        return ffi_array_len(this.items) == 0;
+    }
+
+    size() {
+        return ffi_array_len(this.items);
+    }
+}
+
+class Queue {
+    __init__() {
+        this.items = [];
+    }
+
+    enqueue(item) {
+        ffi_array_push(this.items, item);
+    }
+
+    dequeue() {
+        if this.is_empty() {
+            return null;
+        }
+        return ffi_array_remove(this.items, 0);
+    }
+
+    front() {
+        if this.is_empty() {
+            return null;
+        }
+        return ffi_array_get(this.items, 0);
+    }
+
+    is_empty() {
+        return ffi_array_len(this.items) == 0;
+    }
+
+    size() {
+        return ffi_array_len(this.items);
+    }
+}
+
+class Set {
+    __init__() {
+        this.map = {};
+        this._size = 0;
+    }
+
+    add(item) {
+        let key = ffi_json_stringify(item);
+        if !ffi_dict_has(this.map, key) {
+            ffi_dict_set(this.map, key, item);
+            this._size = this._size + 1;
+        }
+    }
+
+    remove(item) {
+        let key = ffi_json_stringify(item);
+        if ffi_dict_has(this.map, key) {
+            ffi_dict_remove(this.map, key);
+            this._size = this._size - 1;
+        }
+    }
+
+    contains(item) {
+        let key = ffi_json_stringify(item);
+        return ffi_dict_has(this.map, key);
+    }
+
+    size() {
+        return this._size;
+    }
+}

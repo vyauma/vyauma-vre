@@ -2,7 +2,7 @@
 members = [
     "crates/vre-core",
     "crates/vre-cli",
-    "crates/vre-asm", "crates/vre-compiler", "crates/vre-debug",
+    "crates/vre-asm", "crates/vre-compiler", "crates/vre-debug", "crates/vpm",
 ]
 
 resolver = "2"

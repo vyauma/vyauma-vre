@@ -58,21 +58,31 @@ fn parse_and_resolve(
     let mut merged_classes = program.classes.clone();
 
     for import_decl in &program.imports {
-        let import_path_str = resolve_import_path(&import_decl.path);
-
-        let import_path = if import_path_str.starts_with("std/") {
+        let is_std = import_decl.path.starts_with("std/");
+        let is_relative = import_decl.path.starts_with("./") || import_decl.path.starts_with("../");
+        
+        let import_path = if is_std {
             let std_root = std::env::var("VRE_STD_PATH")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("std"));
-            let stripped = import_path_str.strip_prefix("std/").unwrap();
-            std_root.join(stripped)
-        } else if let Some(base) = base_path {
-            base.join(&import_path_str)
+            let stripped = import_decl.path.strip_prefix("std/").unwrap();
+            std_root.join(resolve_import_path(stripped))
+        } else if is_relative {
+            if let Some(base) = base_path {
+                base.join(resolve_import_path(&import_decl.path))
+            } else {
+                return Err(format!(
+                    "Cannot resolve relative import '{}' without a base path",
+                    import_decl.path
+                ));
+            }
         } else {
-            return Err(format!(
-                "Cannot resolve import '{}' without a base path",
-                import_decl.path
-            ));
+            // Package resolution from vyauma_modules
+            let mut p = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            p.push("vyauma_modules");
+            p.push(&import_decl.path);
+            p.push("index.vym");
+            p
         };
 
         let canonical = match vre_core::pal::get_pal().canonicalize(&import_path) {

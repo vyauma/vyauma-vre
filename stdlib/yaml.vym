@@ -1,0 +1,9 @@
+class Yaml {
+    static parse(str) {
+        return ffi_yaml_parse(str);
+    }
+
+    static stringify(obj) {
+        return ffi_yaml_stringify(obj);
+    }
+}
