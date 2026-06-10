@@ -66,3 +66,6 @@ test_io.txt
 *.user
 .DS_Store
 Thumbs.db
+
+# ── Docs ────────────────────────────────────────────────────────────────────
+docs/phases.md
