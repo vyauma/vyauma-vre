@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq)]
-pub enum Token {
+pub enum TokenKind {
     // Keywords
     Fn,
     Let,
@@ -57,27 +57,34 @@ pub enum Token {
     Error(String),
 }
 
-impl Token {
-    pub fn lookup_ident(ident: &str) -> Token {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub line: usize,
+    pub col: usize,
+}
+
+impl TokenKind {
+    pub fn lookup_ident(ident: &str) -> TokenKind {
         match ident {
-            "fn" => Token::Fn,
-            "let" => Token::Let,
-            "if" => Token::If,
-            "else" => Token::Else,
-            "while" => Token::While,
-            "return" => Token::Return,
-            "true" => Token::Boolean(true),
-            "false" => Token::Boolean(false),
-            "struct" => Token::Struct,
-            "class" => Token::Class,
-            "new" => Token::New,
-            "import" => Token::Import,
-            "as" => Token::As,
-            "try" => Token::Try,
-            "catch" => Token::Catch,
-            "throw" => Token::Throw,
-            "for" => Token::For,
-            _ => Token::Identifier(ident.to_string()),
+            "fn" => TokenKind::Fn,
+            "let" => TokenKind::Let,
+            "if" => TokenKind::If,
+            "else" => TokenKind::Else,
+            "while" => TokenKind::While,
+            "return" => TokenKind::Return,
+            "true" => TokenKind::Boolean(true),
+            "false" => TokenKind::Boolean(false),
+            "struct" => TokenKind::Struct,
+            "class" => TokenKind::Class,
+            "new" => TokenKind::New,
+            "import" => TokenKind::Import,
+            "as" => TokenKind::As,
+            "try" => TokenKind::Try,
+            "catch" => TokenKind::Catch,
+            "throw" => TokenKind::Throw,
+            "for" => TokenKind::For,
+            _ => TokenKind::Identifier(ident.to_string()),
         }
     }
 }
@@ -171,102 +178,110 @@ impl<'a> Lexer<'a> {
             break;
         }
 
-        let token = match self.ch {
+        let start_line = self.line;
+        let start_col = self.col;
+
+        let kind = match self.ch {
             Some('=') => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
-                    Token::Equals
+                    TokenKind::Equals
                 } else {
-                    Token::Assign
+                    TokenKind::Assign
                 }
             }
-            Some('+') => Token::Plus,
+            Some('+') => TokenKind::Plus,
             Some('-') => {
                 if self.peek_char() == Some('>') {
                     self.read_char();
-                    Token::ReturnArrow
+                    TokenKind::ReturnArrow
                 } else {
-                    Token::Minus
+                    TokenKind::Minus
                 }
             }
-            Some('*') => Token::Star,
-            Some('/') => Token::Slash,
+            Some('*') => TokenKind::Star,
+            Some('/') => TokenKind::Slash,
             Some('<') => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
-                    Token::LessThanOrEq
+                    TokenKind::LessThanOrEq
                 } else {
-                    Token::LessThan
+                    TokenKind::LessThan
                 }
             }
             Some('>') => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
-                    Token::GreaterThanOrEq
+                    TokenKind::GreaterThanOrEq
                 } else {
-                    Token::GreaterThan
+                    TokenKind::GreaterThan
                 }
             }
             Some('!') => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
-                    Token::NotEquals
+                    TokenKind::NotEquals
                 } else {
-                    Token::Error("Expected '=' after '!'".to_string())
+                    TokenKind::Error("Expected '=' after '!'".to_string())
                 }
             }
             Some('&') => {
                 if self.peek_char() == Some('&') {
                     self.read_char();
-                    Token::And
+                    TokenKind::And
                 } else {
-                    Token::Error("Expected '&' after '&'".to_string())
+                    TokenKind::Error("Expected '&' after '&'".to_string())
                 }
             }
             Some('|') => {
                 if self.peek_char() == Some('|') {
                     self.read_char();
-                    Token::Or
+                    TokenKind::Or
                 } else {
-                    Token::Error("Expected '|' after '|'".to_string())
+                    TokenKind::Error("Expected '|' after '|'".to_string())
                 }
             }
-            Some('(') => Token::LParen,
-            Some(')') => Token::RParen,
-            Some('{') => Token::LBrace,
-            Some('}') => Token::RBrace,
-            Some('[') => Token::LBracket,
-            Some(']') => Token::RBracket,
-            Some(',') => Token::Comma,
-            Some(';') => Token::Semicolon,
-            Some('.') => Token::Dot,
+            Some('(') => TokenKind::LParen,
+            Some(')') => TokenKind::RParen,
+            Some('{') => TokenKind::LBrace,
+            Some('}') => TokenKind::RBrace,
+            Some('[') => TokenKind::LBracket,
+            Some(']') => TokenKind::RBracket,
+            Some(',') => TokenKind::Comma,
+            Some(';') => TokenKind::Semicolon,
+            Some('.') => TokenKind::Dot,
             Some(':') => {
                 if self.peek_char() == Some(':') {
                     self.read_char();
-                    Token::DoubleColon
+                    TokenKind::DoubleColon
                 } else {
-                    Token::Colon
+                    TokenKind::Colon
                 }
             }
-            Some('"') => return self.read_string(),
+            Some('"') => {
+                let kind = self.read_string();
+                return Token { kind, line: start_line, col: start_col };
+            }
             Some(c) if c.is_alphabetic() || c == '_' => {
                 let ident = self.read_identifier();
-                return Token::lookup_ident(&ident);
+                let kind = TokenKind::lookup_ident(&ident);
+                return Token { kind, line: start_line, col: start_col };
             }
             Some(c) if c.is_ascii_digit() => {
                 let num_str = self.read_number();
-                if let Ok(num) = num_str.parse::<f64>() {
-                    return Token::Number(num);
+                let kind = if let Ok(num) = num_str.parse::<f64>() {
+                    TokenKind::Number(num)
                 } else {
-                    return Token::Error(format!("Invalid number: {}", num_str));
-                }
+                    TokenKind::Error(format!("Invalid number: {}", num_str))
+                };
+                return Token { kind, line: start_line, col: start_col };
             }
-            Some(c) => Token::Error(format!("Unexpected character: {}", c)),
-            None => Token::Eof,
+            Some(c) => TokenKind::Error(format!("Unexpected character: {}", c)),
+            None => TokenKind::Eof,
         };
 
         self.read_char();
-        token
+        Token { kind, line: start_line, col: start_col }
     }
 
     fn read_identifier(&mut self) -> String {
@@ -281,7 +296,7 @@ impl<'a> Lexer<'a> {
         self.input[position..self.position].to_string()
     }
 
-    fn read_string(&mut self) -> Token {
+    fn read_string(&mut self) -> TokenKind {
         self.read_char(); // consume quote
         let mut string = String::new();
         while let Some(c) = self.ch {
@@ -306,7 +321,7 @@ impl<'a> Lexer<'a> {
             self.read_char();
         }
         self.read_char(); // consume closing quote
-        Token::String(string)
+        TokenKind::String(string)
     }
 
     fn read_number(&mut self) -> String {
@@ -347,69 +362,69 @@ mod tests {
         "#;
 
         let tests = vec![
-            Token::Let,
-            Token::Identifier("five".to_string()),
-            Token::Assign,
-            Token::Number(5.0),
-            Token::Semicolon,
+            TokenKind::Let,
+            TokenKind::Identifier("five".to_string()),
+            TokenKind::Assign,
+            TokenKind::Number(5.0),
+            TokenKind::Semicolon,
             
-            Token::Let,
-            Token::Identifier("ten".to_string()),
-            Token::Assign,
-            Token::Number(10.0),
-            Token::Semicolon,
+            TokenKind::Let,
+            TokenKind::Identifier("ten".to_string()),
+            TokenKind::Assign,
+            TokenKind::Number(10.0),
+            TokenKind::Semicolon,
 
-            Token::Fn,
-            Token::Identifier("add".to_string()),
-            Token::LParen,
-            Token::Identifier("x".to_string()),
-            Token::Comma,
-            Token::Identifier("y".to_string()),
-            Token::RParen,
-            Token::LBrace,
-            Token::Return,
-            Token::Identifier("x".to_string()),
-            Token::Plus,
-            Token::Identifier("y".to_string()),
-            Token::Semicolon,
-            Token::RBrace,
+            TokenKind::Fn,
+            TokenKind::Identifier("add".to_string()),
+            TokenKind::LParen,
+            TokenKind::Identifier("x".to_string()),
+            TokenKind::Comma,
+            TokenKind::Identifier("y".to_string()),
+            TokenKind::RParen,
+            TokenKind::LBrace,
+            TokenKind::Return,
+            TokenKind::Identifier("x".to_string()),
+            TokenKind::Plus,
+            TokenKind::Identifier("y".to_string()),
+            TokenKind::Semicolon,
+            TokenKind::RBrace,
 
-            Token::Let,
-            Token::Identifier("result".to_string()),
-            Token::Assign,
-            Token::Identifier("add".to_string()),
-            Token::LParen,
-            Token::Identifier("five".to_string()),
-            Token::Comma,
-            Token::Identifier("ten".to_string()),
-            Token::RParen,
-            Token::Semicolon,
+            TokenKind::Let,
+            TokenKind::Identifier("result".to_string()),
+            TokenKind::Assign,
+            TokenKind::Identifier("add".to_string()),
+            TokenKind::LParen,
+            TokenKind::Identifier("five".to_string()),
+            TokenKind::Comma,
+            TokenKind::Identifier("ten".to_string()),
+            TokenKind::RParen,
+            TokenKind::Semicolon,
 
-            Token::If,
-            Token::Identifier("result".to_string()),
-            Token::GreaterThanOrEq,
-            Token::Number(15.0),
-            Token::LBrace,
-            Token::Identifier("print".to_string()),
-            Token::LParen,
-            Token::Identifier("result".to_string()),
-            Token::RParen,
-            Token::Semicolon,
-            Token::RBrace,
-            Token::Else,
-            Token::LBrace,
-            Token::Return,
-            Token::Number(0.0),
-            Token::Semicolon,
-            Token::RBrace,
-            Token::Eof,
+            TokenKind::If,
+            TokenKind::Identifier("result".to_string()),
+            TokenKind::GreaterThanOrEq,
+            TokenKind::Number(15.0),
+            TokenKind::LBrace,
+            TokenKind::Identifier("print".to_string()),
+            TokenKind::LParen,
+            TokenKind::Identifier("result".to_string()),
+            TokenKind::RParen,
+            TokenKind::Semicolon,
+            TokenKind::RBrace,
+            TokenKind::Else,
+            TokenKind::LBrace,
+            TokenKind::Return,
+            TokenKind::Number(0.0),
+            TokenKind::Semicolon,
+            TokenKind::RBrace,
+            TokenKind::Eof,
         ];
 
         let mut lexer = Lexer::new(input);
 
         for expected_token in tests {
             let tok = lexer.next_token();
-            assert_eq!(tok, expected_token);
+            assert_eq!(tok.kind, expected_token);
         }
     }
 }
