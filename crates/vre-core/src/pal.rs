@@ -43,9 +43,28 @@ pub trait PlatformAbstractionLayer: Send + Sync {
     fn load_library(&self, path: &str) -> Result<usize, String>;
     fn resolve_symbol(&self, lib: usize, sym: &str) -> Result<usize, String>;
     fn unload_library(&self, lib: usize) -> Result<(), String>;
+
+    fn watch_file(&self, path: &Path) -> Result<usize, String>;
+    fn handle_interrupt(&self) -> Result<(), String>;
 }
 
-pub struct OsPal;
+pub struct OsPal {
+    libraries: std::sync::Mutex<HashMap<usize, libloading::Library>>,
+    next_lib_id: std::sync::Mutex<usize>,
+    watchers: std::sync::Mutex<HashMap<usize, notify::RecommendedWatcher>>,
+    next_watcher_id: std::sync::Mutex<usize>,
+}
+
+impl Default for OsPal {
+    fn default() -> Self {
+        Self {
+            libraries: std::sync::Mutex::new(HashMap::new()),
+            next_lib_id: std::sync::Mutex::new(1),
+            watchers: std::sync::Mutex::new(HashMap::new()),
+            next_watcher_id: std::sync::Mutex::new(1),
+        }
+    }
+}
 
 impl PlatformAbstractionLayer for OsPal {
     fn read_to_string(&self, path: &Path) -> Result<String, String> {
@@ -184,16 +203,65 @@ impl PlatformAbstractionLayer for OsPal {
         Ok(addrs.map(|a| a.ip()).collect())
     }
 
-    fn load_library(&self, _path: &str) -> Result<usize, String> {
-        Err("Dynamic libraries not yet implemented in OsPal".to_string())
+    fn load_library(&self, path: &str) -> Result<usize, String> {
+        unsafe {
+            let lib = libloading::Library::new(path).map_err(|e| e.to_string())?;
+            let mut id_lock = self.next_lib_id.lock().unwrap();
+            let id = *id_lock;
+            *id_lock += 1;
+            
+            self.libraries.lock().unwrap().insert(id, lib);
+            Ok(id)
+        }
     }
 
-    fn resolve_symbol(&self, _lib: usize, _sym: &str) -> Result<usize, String> {
-        Err("Dynamic libraries not yet implemented in OsPal".to_string())
+    fn resolve_symbol(&self, lib_id: usize, sym: &str) -> Result<usize, String> {
+        let libs = self.libraries.lock().unwrap();
+        if let Some(lib) = libs.get(&lib_id) {
+            unsafe {
+                let symbol: libloading::Symbol<*mut std::ffi::c_void> = lib.get(sym.as_bytes()).map_err(|e| e.to_string())?;
+                // We return the raw pointer cast to usize
+                Ok(*symbol as usize)
+            }
+        } else {
+            Err("Library not loaded".to_string())
+        }
     }
 
-    fn unload_library(&self, _lib: usize) -> Result<(), String> {
-        Err("Dynamic libraries not yet implemented in OsPal".to_string())
+    fn unload_library(&self, lib_id: usize) -> Result<(), String> {
+        let mut libs = self.libraries.lock().unwrap();
+        if libs.remove(&lib_id).is_some() {
+            Ok(())
+        } else {
+            Err("Library not found".to_string())
+        }
+    }
+
+    fn watch_file(&self, path: &Path) -> Result<usize, String> {
+        use notify::{Watcher, RecursiveMode};
+        let mut watcher = notify::recommended_watcher(|res| {
+            // Note: For a fully integrated VM, this would push an event to the VM event loop
+            match res {
+                Ok(event) => println!("FS Watch Event: {:?}", event),
+                Err(e) => println!("FS Watch Error: {:?}", e),
+            }
+        }).map_err(|e| e.to_string())?;
+        
+        watcher.watch(path, RecursiveMode::NonRecursive).map_err(|e| e.to_string())?;
+
+        let mut id_lock = self.next_watcher_id.lock().unwrap();
+        let id = *id_lock;
+        *id_lock += 1;
+
+        self.watchers.lock().unwrap().insert(id, watcher);
+        Ok(id)
+    }
+
+    fn handle_interrupt(&self) -> Result<(), String> {
+        ctrlc::set_handler(move || {
+            println!("Received Interrupt Signal! Halting gracefully...");
+            std::process::exit(0);
+        }).map_err(|e| e.to_string())
     }
 }
 
@@ -202,7 +270,7 @@ use std::sync::OnceLock;
 static PAL_INSTANCE: OnceLock<Box<dyn PlatformAbstractionLayer>> = OnceLock::new();
 
 pub fn get_pal() -> &'static dyn PlatformAbstractionLayer {
-    PAL_INSTANCE.get_or_init(|| Box::new(OsPal)).as_ref()
+    PAL_INSTANCE.get_or_init(|| Box::new(OsPal::default())).as_ref()
 }
 
 pub fn set_pal(pal: Box<dyn PlatformAbstractionLayer>) {

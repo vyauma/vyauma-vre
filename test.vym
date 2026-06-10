@@ -1,0 +1,7 @@
+fn main():
+    let x = 10
+    let y = x + 5 * 2
+    if y > 15:
+        ffi_console_print("y is greater than 15\n")
+    else:
+        return 0

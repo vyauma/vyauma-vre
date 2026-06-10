@@ -105,6 +105,9 @@ impl PlatformAbstractionLayer for MockPal {
     fn load_library(&self, _path: &str) -> Result<usize, String> { Err("Mock".to_string()) }
     fn resolve_symbol(&self, _lib: usize, _sym: &str) -> Result<usize, String> { Err("Mock".to_string()) }
     fn unload_library(&self, _lib: usize) -> Result<(), String> { Ok(()) }
+
+    fn watch_file(&self, _path: &Path) -> Result<usize, String> { Ok(0) }
+    fn handle_interrupt(&self) -> Result<(), String> { Ok(()) }
 }
 
 #[test]

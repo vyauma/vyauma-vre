@@ -16,6 +16,7 @@
 - Repository architecture
 - Contribution guidelines
 - Versioning strategy
+
 ## Phase 1 — Core Virtual Machine
 
 **Status: ✅ Mostly Complete**
@@ -42,9 +43,10 @@
 - Stack trace
 - VM errors
 - Debug CLI
+
 ## Phase 2 — Runtime Foundation
 
-**Status: 🟡**
+**Status: ✅ Mostly Complete**
 
 ### Runtime Values
 - Null
@@ -75,9 +77,8 @@
 - Reference Tracking
 - Exception Runtime
 - Native Runtime Layer
-## Phase 3 — Platform Abstraction Layer (PAL)
 
-**Status: ⬜**
+## Phase 3 — Platform Abstraction Layer (PAL) [✅ Mostly Complete]
 
 *Most important next phase.*
 
@@ -116,6 +117,7 @@
 - Linux
 - macOS
 ### Android
+
 ## Phase 4 — Runtime Standard Library
 ### Collections
 - Array
@@ -146,6 +148,7 @@
 - WebSocket
 - TCP
 - UDP
+
 ## Phase 5 — Async Runtime
 ### Scheduler
 - Tasks
@@ -163,6 +166,7 @@
 - Task Scheduler
 ### Event Loop
 - Async Runtime
+
 ## Phase 6 — Security & Capability System
 ### Permissions
 ### Filesystem
@@ -179,6 +183,7 @@
     vre run app.vyma --allow-read
 
     vre run app.vyma --allow-write
+
 ## Phase 7 — Package & Module System
 ### Module Loader
 - Import
@@ -196,6 +201,7 @@
 - Update
 - Publish
 - Registry
+
 ## Phase 8 — VRE Intermediate Representation (VIR)
 
 *This is where VRE becomes language-agnostic.*
@@ -216,6 +222,7 @@
 - Inlining
 - Constant Folding
 - Loop Optimization
+
 ## Phase 9 — JIT Compiler
 ### Tier 1
 - Interpreter
@@ -226,6 +233,7 @@
 ### Targets
 - x86_64
 - ARM64
+
 ## Phase 10 — TypeScript Runtime Support
 
 *First external language.*
@@ -245,6 +253,7 @@
 ### Goal
 - TypeScript Desktop Apps
 - Without Electron
+
 ## Phase 11 — JavaScript Runtime Support
 ### Features
 - ES202x
@@ -256,6 +265,7 @@
 - Prototype chain
 - Reflection
 - Eval
+
 ## Phase 12 — PHP Runtime Support
 ### Features
 - Classes
@@ -272,6 +282,7 @@
 - PHP Desktop Apps
 - PHP Mobile Apps
 - PHP Embedded Apps
+
 ## Phase 13 — Python Runtime Support
 ### Features
 - Classes
@@ -280,6 +291,7 @@
 - Typing
 ### Goal
 - Python on VRE
+
 ## Phase 14 — Native UI Framework
 
 *This is where VRE becomes a real Electron alternative.*
@@ -302,6 +314,7 @@
 - macOS
 ### Android
 ### iOS
+
 ## Phase 15 — Mobile Runtime
 ### Android
 - APK Generation
@@ -310,6 +323,7 @@
 ### iOS
 - IPA Generation
 - UIKit Bridge
+
 ## Phase 16 — Cloud Runtime
 ### Server Features
 - HTTP
@@ -321,6 +335,7 @@
 - Docker
 - Kubernetes
 - Serverless
+
 ## Phase 17 — Embedded Runtime
 ### Platforms
 - Raspberry Pi
@@ -331,12 +346,14 @@
 - I2C
 - SPI
 - UART
+
 ## Phase 18 — Distributed Runtime
 ### Features
 - Cluster Nodes
 - Remote Execution
 - Distributed Objects
 - Actor System
+
 ## Phase 19 — Vyauma Language Public Release
 
 *Only after VRE is mature.*
@@ -352,6 +369,7 @@
 - Concurrency
 - Safety
 - Cross Platform
+
 ## Phase 20 — VRE Ecosystem
 ### Developer Tools
 - IDE

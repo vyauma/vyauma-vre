@@ -10,5 +10,8 @@ name = "vre_core"
 path = "src/lib.rs"
 
 [dependencies]
+ctrlc = "3.4"
+libloading = "0.8"
 mio = { version = "1.2.1", features = ["os-poll", "net"] }
+notify = "6.1"
 region = "3.0.0"

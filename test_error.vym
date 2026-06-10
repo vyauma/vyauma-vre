@@ -1,0 +1,2 @@
+fn main():
+    let x: Int32 = 10.5
