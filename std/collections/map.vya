@@ -1,0 +1,9 @@
+// Map (Dict) utilities wrapping native FFI
+
+fn keys(map: Any) -> Any {
+    return ffi_dict_keys(map);
+}
+
+fn has(map: Any, key: Any) -> Bool {
+    return ffi_dict_has(map, key);
+}

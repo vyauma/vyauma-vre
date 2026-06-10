@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(f64),
+    Boolean(bool),
     Identifier(String, Option<Type>),
     StringLiteral(String),
     BinaryOp(Box<Expr>, BinaryOperator, Box<Expr>, Option<Type>),

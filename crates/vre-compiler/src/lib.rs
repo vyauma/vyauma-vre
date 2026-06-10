@@ -60,40 +60,47 @@ fn parse_and_resolve(
     for import_decl in &program.imports {
         let import_path_str = resolve_import_path(&import_decl.path);
 
-        if let Some(base) = base_path {
-            let import_path = base.join(&import_path_str);
-            let canonical = match vre_core::pal::get_pal().canonicalize(&import_path) {
-                Ok(p) => p,
-                Err(_) => import_path.clone(),
-            };
-
-            if visited.contains(&canonical) {
-                continue;
-            }
-            visited.insert(canonical.clone());
-
-            let imported_source = vre_core::pal::get_pal()
-                .read_to_string(&import_path)
-                .map_err(|e| format!("Failed to read imported file '{}': {}", import_path.display(), e))?;
-
-            let new_base = import_path.parent();
-            let import_path_str_full = import_path.to_string_lossy().to_string();
-            let mut imported_program =
-                parse_and_resolve(&imported_source, &import_path_str_full, new_base, visited)?;
-
-            // Apply name-mangling using the import's namespace
-            let namespace = import_decl.namespace();
-            mangle_program(&mut imported_program, &namespace);
-
-            merged_functions.extend(imported_program.functions);
-            merged_structs.extend(imported_program.structs);
-            merged_classes.extend(imported_program.classes);
+        let import_path = if import_path_str.starts_with("std/") {
+            let std_root = std::env::var("VRE_STD_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("std"));
+            let stripped = import_path_str.strip_prefix("std/").unwrap();
+            std_root.join(stripped)
+        } else if let Some(base) = base_path {
+            base.join(&import_path_str)
         } else {
             return Err(format!(
                 "Cannot resolve import '{}' without a base path",
                 import_decl.path
             ));
+        };
+
+        let canonical = match vre_core::pal::get_pal().canonicalize(&import_path) {
+            Ok(p) => p,
+            Err(_) => import_path.clone(),
+        };
+
+        if visited.contains(&canonical) {
+            continue;
         }
+        visited.insert(canonical.clone());
+
+        let imported_source = vre_core::pal::get_pal()
+            .read_to_string(&import_path)
+            .map_err(|e| format!("Failed to read imported file '{}': {}", import_path.display(), e))?;
+
+        let new_base = import_path.parent();
+        let import_path_str_full = import_path.to_string_lossy().to_string();
+        let mut imported_program =
+            parse_and_resolve(&imported_source, &import_path_str_full, new_base, visited)?;
+
+        // Apply name-mangling using the import's namespace
+        let namespace = import_decl.namespace();
+        mangle_program(&mut imported_program, &namespace);
+
+        merged_functions.extend(imported_program.functions);
+        merged_structs.extend(imported_program.structs);
+        merged_classes.extend(imported_program.classes);
     }
 
     Ok(Program {
@@ -227,6 +234,6 @@ fn mangle_expr(expr: &mut Expr, namespace: &str, local_fns: &HashSet<String>) {
                 mangle_expr(a, namespace, local_fns);
             }
         }
-        Expr::Number(_) | Expr::StringLiteral(_) | Expr::Identifier(_, _) => {}
+        Expr::Number(_) | Expr::Boolean(_) | Expr::StringLiteral(_) | Expr::Identifier(_, _) => {}
     }
 }

@@ -1,0 +1,42 @@
+import "std/collections/array"
+import "std/collections/map"
+import "std/collections/set"
+import "std/collections/queue"
+import "std/collections/stack"
+import "std/utils/string"
+import "std/utils/math"
+
+fn main() {
+    ffi_console_println("--- Testing std/collections/array ---");
+    let arr: Any = [1, 2, 3];
+    array__push(arr, 4);
+    ffi_console_println("Array length: " + array__len(arr));
+    
+    ffi_console_println("--- Testing std/collections/map ---");
+    let m: Any = { "a": 1 };
+    ffi_console_println("Map has 'a': " + map__has(m, "a"));
+    
+    ffi_console_println("--- Testing std/collections/set ---");
+    let s: Set = new Set({});
+    s.add("apple");
+    ffi_console_println("Set has apple: " + s.has("apple"));
+    
+    ffi_console_println("--- Testing std/collections/queue ---");
+    let q: Queue = new Queue([]);
+    q.enqueue("first");
+    q.enqueue("second");
+    ffi_console_println("Queue dequeue: " + q.dequeue());
+    
+    ffi_console_println("--- Testing std/collections/stack ---");
+    let st: Stack = new Stack([]);
+    st.push("bottom");
+    st.push("top");
+    ffi_console_println("Stack pop: " + st.pop());
+    
+    ffi_console_println("--- Testing std/utils/string ---");
+    let str: String = "Hello World";
+    ffi_console_println("String lower: " + string__to_lower(str));
+    
+    ffi_console_println("--- Testing std/utils/math ---");
+    ffi_console_println("Math Pi: " + math__pi());
+}

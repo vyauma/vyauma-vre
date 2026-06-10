@@ -22,7 +22,7 @@ fn main() {
 
     let input_path = &args[1];
 
-    let (instructions, constants, native_imports) = if input_path.ends_with(".vym") {
+    let (instructions, constants, native_imports) = if input_path.ends_with(".vym") || input_path.ends_with(".vya") {
         let source = match vre_core::pal::get_pal().read_to_string(std::path::Path::new(input_path)) {
             Ok(s) => s,
             Err(e) => {

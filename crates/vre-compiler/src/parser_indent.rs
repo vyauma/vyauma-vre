@@ -593,6 +593,7 @@ impl<'a> ParserIndent<'a> {
                 }
             }
             TokenKind::Number(val) => Ok(Expr::Number(*val)),
+            TokenKind::Boolean(b) => Ok(Expr::Boolean(*b)),
             TokenKind::String(s) => Ok(Expr::StringLiteral(s.clone())),
             TokenKind::LParen => {
                 self.next_token();
@@ -779,11 +780,11 @@ impl<'a> ParserIndent<'a> {
         };
 
         if self.peek_token.kind == TokenKind::LParen {
-            self.next_token(); // move to '('
-            self.next_token(); // move inside '('
+            self.expect_peek(TokenKind::LParen)?; // move to '('
             
             let mut args = Vec::new();
-            if self.current_token.kind != TokenKind::RParen {
+            if self.peek_token.kind != TokenKind::RParen {
+                self.next_token(); // move to first arg
                 args.push(self.parse_expression(Precedence::Lowest)?);
 
                 while self.peek_token.kind == TokenKind::Comma {
@@ -792,13 +793,9 @@ impl<'a> ParserIndent<'a> {
                     args.push(self.parse_expression(Precedence::Lowest)?);
                 }
             }
-            if self.peek_token.kind == TokenKind::RParen {
-                self.next_token(); // move to ')'
-            } else if self.current_token.kind != TokenKind::RParen {
-                return Err("Expected ')' after method arguments".to_string());
-            }
+            self.expect_peek(TokenKind::RParen)?;
             
-            Ok(Expr::MethodCall(Box::new(left), prop, args, None))
+            return Ok(Expr::MethodCall(Box::new(left), prop, args, None));
         } else {
             Ok(Expr::PropertyAccess(Box::new(left), prop, None))
         }

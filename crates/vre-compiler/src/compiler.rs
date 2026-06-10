@@ -142,7 +142,10 @@ impl Compiler {
 
         self.compile_block(func.body)?;
 
-        // Ensure functions always return
+        // Ensure functions always return a value
+        let idx = self.add_constant(Value::Float64(0.0));
+        self.emit_opcode(OpCode::Push);
+        self.emit_u16(idx);
         self.emit_opcode(OpCode::Return);
 
         Ok(())
@@ -380,6 +383,11 @@ impl Compiler {
                 self.emit_opcode(OpCode::Push);
                 self.emit_u16(idx);
             }
+            Expr::Boolean(b) => {
+                let idx = self.add_constant(Value::Bool(b));
+                self.emit_opcode(OpCode::Push);
+                self.emit_u16(idx);
+            }
             Expr::Identifier(name, expr_type) => {
                 if let Some(&idx) = self.locals.get(&name) {
                     let op = match expr_type.unwrap_or(Type::Any) {
@@ -405,6 +413,7 @@ impl Compiler {
                         Type::Int32 => self.emit_opcode(OpCode::AddI32),
                         Type::Int64 => self.emit_opcode(OpCode::AddI64),
                         Type::Float32 => self.emit_opcode(OpCode::AddF32),
+                        Type::String => self.emit_opcode(OpCode::AddStr),
                         _ => self.emit_opcode(OpCode::AddF64),
                     },
                     BinaryOperator::Subtract => match ty {

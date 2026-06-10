@@ -1,0 +1,37 @@
+import "std/collections/array";
+
+class Queue {
+    _items: Any
+
+    fn init() {
+        self._items = [];
+    }
+
+    fn enqueue(item: Any) {
+        array__push(self._items, item);
+    }
+
+    fn dequeue() -> Any {
+        // We need a shift/pop_front operation.
+        // Wait, ffi_array_pop removes from the end.
+        // Since we don't have shift, let's just reverse or shift elements manually for now, 
+        // or just accept it's a stack for now and wait for shift implementation.
+        // Actually, we can manually shift.
+        let len: Float64 = array__len(self._items);
+        if len == 0 {
+            return 0;
+        }
+        let first: Any = array__get(self._items, 0);
+        
+        let new_items: Any = [];
+        for let i: Float64 = 1; i < len; i = i + 1 {
+            array__push(new_items, array__get(self._items, i));
+        }
+        self._items = new_items;
+        return first;
+    }
+
+    fn size() -> Float64 {
+        return array__len(self._items);
+    }
+}

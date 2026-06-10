@@ -169,7 +169,7 @@ impl AstOptimizer {
                     self.optimize_expression(arg);
                 }
             }
-            Expr::Identifier(_, _) | Expr::Number(_) | Expr::StringLiteral(_) => {}
+            Expr::Identifier(_, _) | Expr::Number(_) | Expr::Boolean(_) | Expr::StringLiteral(_) => {}
         }
     }
 }

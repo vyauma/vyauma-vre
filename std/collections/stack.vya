@@ -1,0 +1,29 @@
+import "std/collections/array";
+
+class Stack {
+    _items: Any
+
+    fn init() {
+        self._items = [];
+    }
+
+    fn push(item: Any) {
+        array__push(self._items, item);
+    }
+
+    fn pop() -> Any {
+        return array__pop(self._items);
+    }
+
+    fn peek() -> Any {
+        let len: Float64 = array__len(self._items);
+        if len == 0 {
+            return 0;
+        }
+        return array__get(self._items, len - 1);
+    }
+
+    fn size() -> Float64 {
+        return array__len(self._items);
+    }
+}

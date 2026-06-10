@@ -41,6 +41,8 @@ pub enum OpCode {
     EqualF64 = 0x4A, NotEqualF64 = 0x4B, LessF64 = 0x4C, LessEqualF64 = 0x4D, GreaterF64 = 0x4E, GreaterEqualF64 = 0x4F,
     // Comparison String
     EqualStr = 0x50, NotEqualStr = 0x51,
+    // String operations
+    AddStr = 0x54,
     // Logical
     AndBool = 0x52, OrBool = 0x53,
 
@@ -101,6 +103,7 @@ impl OpCode {
             0x44 => Some(OpCode::EqualF32), 0x45 => Some(OpCode::NotEqualF32), 0x46 => Some(OpCode::LessF32), 0x47 => Some(OpCode::LessEqualF32), 0x48 => Some(OpCode::GreaterF32), 0x49 => Some(OpCode::GreaterEqualF32),
             0x4A => Some(OpCode::EqualF64), 0x4B => Some(OpCode::NotEqualF64), 0x4C => Some(OpCode::LessF64), 0x4D => Some(OpCode::LessEqualF64), 0x4E => Some(OpCode::GreaterF64), 0x4F => Some(OpCode::GreaterEqualF64),
             0x50 => Some(OpCode::EqualStr), 0x51 => Some(OpCode::NotEqualStr),
+            0x54 => Some(OpCode::AddStr),
             0x52 => Some(OpCode::AndBool), 0x53 => Some(OpCode::OrBool),
 
             0x60 => Some(OpCode::Jump),

@@ -1,0 +1,21 @@
+// Array utilities wrapping native FFI
+
+fn push(arr: Any, val: Any) -> Any {
+    return ffi_array_push(arr, val);
+}
+
+fn pop(arr: Any) -> Any {
+    return ffi_array_pop(arr);
+}
+
+fn len(arr: Any) -> Float64 {
+    return ffi_array_len(arr);
+}
+
+fn get(arr: Any, index: Float64) -> Any {
+    return ffi_array_get(arr, index);
+}
+
+fn set(arr: Any, index: Float64, val: Any) -> Any {
+    return ffi_array_set(arr, index, val);
+}

@@ -189,11 +189,15 @@ impl VirtualMachine {
         }
     }
 
-    /// Execute a single instruction
+    /// Execute a single instruction (public for tests)
     pub fn step(&mut self) -> VreResult<()> {
-        let opcode_byte = self.read_u8()?;
-        let opcode = OpCode::from_u8(opcode_byte)
-            .ok_or(VreError::InvalidOpcode(opcode_byte))?;
+        let op = self.read_u8()?;
+        self.execute_instruction(op)
+    }
+
+    fn execute_instruction(&mut self, op: u8) -> VreResult<()> {
+        let opcode = OpCode::from_u8(op)
+            .ok_or(VreError::InvalidOpcode(op))?;
 
         match opcode {
             // ── System ─────────────────────────────────────────────────────
@@ -324,6 +328,32 @@ impl VirtualMachine {
             // ── Comparison String ─────────────────────────────────────────
             OpCode::EqualStr => { let (a, b) = self.pop_two_string()?; self.stack.push(Value::Bool(a == b)) }
             OpCode::NotEqualStr => { let (a, b) = self.pop_two_string()?; self.stack.push(Value::Bool(a != b)) }
+            OpCode::AddStr => {
+                let b = self.stack.pop().unwrap();
+                let a = self.stack.pop().unwrap();
+                
+                let a_str = match a {
+                    Value::String(s) => s,
+                    Value::Float64(n) => n.to_string(),
+                    Value::Float32(n) => n.to_string(),
+                    Value::Int64(n) => n.to_string(),
+                    Value::Int32(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Null => "null".to_string(),
+                    _ => format!("{:?}", a),
+                };
+                let b_str = match b {
+                    Value::String(s) => s,
+                    Value::Float64(n) => n.to_string(),
+                    Value::Float32(n) => n.to_string(),
+                    Value::Int64(n) => n.to_string(),
+                    Value::Int32(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Null => "null".to_string(),
+                    _ => format!("{:?}", b),
+                };
+                self.stack.push(Value::String(format!("{}{}", a_str, b_str)))
+            }
             OpCode::AndBool => {
                 let b = self.stack.pop().unwrap();
                 let a = self.stack.pop().unwrap();

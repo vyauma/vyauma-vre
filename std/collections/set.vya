@@ -1,0 +1,30 @@
+import "std/collections/map";
+
+class Set {
+    _map: Any
+
+    fn init() {
+        self._map = {};
+    }
+
+    fn add(item: Any) {
+        let map: Any = self._map;
+        map[item] = true;
+    }
+
+    fn has(item: Any) -> Bool {
+        let exists: Bool = map__has(self._map, item);
+        if exists {
+            let val: Any = self._map[item];
+            if val {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn remove(item: Any) {
+        let map: Any = self._map;
+        map[item] = false;
+    }
+}

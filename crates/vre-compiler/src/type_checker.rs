@@ -9,6 +9,7 @@ pub enum TypeError {
     UndefinedFunction(String),
     InvalidArguments(String),
     UndefinedStruct(String),
+    UndefinedClass(String),
     UnknownProperty(String),
     MissingField(String),
     ExtraField(String),
@@ -24,6 +25,7 @@ impl std::fmt::Display for TypeError {
             TypeError::UndefinedFunction(name) => write!(f, "Undefined function: {}", name),
             TypeError::InvalidArguments(msg) => write!(f, "Invalid arguments: {}", msg),
             TypeError::UndefinedStruct(name) => write!(f, "Undefined struct: {}", name),
+            TypeError::UndefinedClass(name) => write!(f, "Undefined class: {}", name),
             TypeError::UnknownProperty(name) => write!(f, "Unknown property: {}", name),
             TypeError::MissingField(name) => write!(f, "Missing field: {}", name),
             TypeError::ExtraField(name) => write!(f, "Extra field: {}", name),
@@ -346,8 +348,8 @@ impl TypeChecker {
                 let obj_ty = self.get_expr_type(obj_expr)?;
                 let rhs_ty = self.get_expr_type(rhs)?;
                 
-                if let Type::Struct(struct_name) = obj_ty {
-                    if let Some(struct_fields) = self.env.structs.get(&struct_name).cloned() {
+                if let Type::Struct(struct_name) = &obj_ty {
+                    if let Some(struct_fields) = self.env.structs.get(struct_name).cloned() {
                         if let Some(expected_ty) = struct_fields.get(prop_name) {
                             let is_numeric_literal = matches!(rhs, Expr::Number(_)) && matches!(expected_ty, Type::Int32 | Type::Int64 | Type::Float32 | Type::Float64);
                             if !is_numeric_literal && expected_ty != &Type::Any && rhs_ty != Type::Any && expected_ty != &rhs_ty {
@@ -361,6 +363,22 @@ impl TypeChecker {
                         }
                     } else {
                         return Err(TypeError::UndefinedStruct(struct_name.clone()));
+                    }
+                } else if let Type::Class(class_name) = &obj_ty {
+                    if let Some(class_def) = self.env.classes.get(class_name).cloned() {
+                        if let Some(expected_ty) = class_def.fields.get(prop_name) {
+                            let is_numeric_literal = matches!(rhs, Expr::Number(_)) && matches!(expected_ty, Type::Int32 | Type::Int64 | Type::Float32 | Type::Float64);
+                            if !is_numeric_literal && expected_ty != &Type::Any && rhs_ty != Type::Any && expected_ty != &rhs_ty {
+                                return Err(TypeError::TypeMismatch {
+                                    expected: format!("{:?}", expected_ty),
+                                    found: format!("{:?}", rhs_ty),
+                                });
+                            }
+                        } else {
+                            return Err(TypeError::UnknownProperty(prop_name.clone()));
+                        }
+                    } else {
+                        return Err(TypeError::UndefinedClass(class_name.clone()));
                     }
                 } else if obj_ty != Type::Any {
                     return Err(TypeError::UnsupportedOperation(format!("Cannot assign property to {:?}", obj_ty)));
@@ -377,7 +395,10 @@ impl TypeChecker {
         if expected == found { return true; }
         
         match (expected, found, expr) {
+            (Type::Struct(n1), Type::Class(n2), _) if n1 == n2 => true,
+            (Type::Class(n1), Type::Struct(n2), _) if n1 == n2 => true,
             (Type::Int32 | Type::Int64 | Type::Float32 | Type::Float64, _, Expr::Number(_)) => true,
+            (Type::Bool, _, Expr::Boolean(_)) => true,
             (Type::Array(e_expected), Type::Array(e_found), Expr::ArrayLiteral(elems)) => {
                 if e_expected == e_found { return true; }
                 if elems.is_empty() { return true; }
@@ -405,6 +426,7 @@ impl TypeChecker {
     fn get_expr_type(&mut self, expr: &mut Expr) -> Result<Type, TypeError> {
         match expr {
             Expr::Number(_) => Ok(Type::Float64), // Default number literal is Float64
+            Expr::Boolean(_) => Ok(Type::Bool),
             Expr::StringLiteral(_) => Ok(Type::String),
             Expr::Identifier(name, ref mut expr_type) => {
                 // "true" and "false" are bools, but handled by lexer usually?
@@ -416,6 +438,12 @@ impl TypeChecker {
             Expr::BinaryOp(left, op, right, ref mut expr_type) => {
                 let l_ty = self.get_expr_type(left)?;
                 let r_ty = self.get_expr_type(right)?;
+                
+                // String concatenation: if either side is String, the Add is string concat
+                if *op == BinaryOperator::Add && (l_ty == Type::String || r_ty == Type::String) {
+                    *expr_type = Some(Type::String);
+                    return Ok(Type::String);
+                }
                 
                 if l_ty == Type::Any || r_ty == Type::Any {
                     return Ok(Type::Any);
@@ -479,12 +507,20 @@ impl TypeChecker {
                     return Ok(sig.return_type);
                 }
                 
+                for arg in args.iter_mut() {
+                    let _ = self.get_expr_type(arg);
+                }
+                
                 // Allow FFI or built-in calls that we don't know about by returning Any
                 *expr_type = Some(Type::Any);
                 Ok(Type::Any)
             }
-            Expr::NewClass(name, args) => {
-                if let Some(class_def) = self.env.classes.get(name).cloned() {
+            Expr::NewClass(_, _) => {
+                let (name, mut args) = match std::mem::replace(expr, Expr::Number(0.0)) {
+                    Expr::NewClass(n, a) => (n, a),
+                    _ => unreachable!(),
+                };
+                if let Some(class_def) = self.env.classes.get(&name).cloned() {
                     if class_def.field_order.len() != args.len() {
                         return Err(TypeError::InvalidArguments(format!("Class {} expected {} args, got {}", name, class_def.field_order.len(), args.len())));
                     }
@@ -500,6 +536,13 @@ impl TypeChecker {
                             });
                         }
                     }
+                    
+                    let mut fields = Vec::new();
+                    for (i, arg) in args.into_iter().enumerate() {
+                        fields.push((class_def.field_order[i].clone(), arg));
+                    }
+                    *expr = Expr::StructInit(name.clone(), fields);
+                    
                     Ok(Type::Class(name.clone()))
                 } else {
                     Err(TypeError::UndefinedStruct(name.clone()))
@@ -536,7 +579,30 @@ impl TypeChecker {
             }
             Expr::PropertyAccess(obj_expr, prop_name, ref mut expr_type) => {
                 let obj_ty = self.get_expr_type(obj_expr)?;
-                if let Type::Struct(struct_name) = obj_ty {
+                let class_name = match &obj_ty {
+                    Type::Class(name) => Some(name.clone()),
+                    Type::Struct(name) => {
+                        if self.env.classes.contains_key(name) {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
+                    },
+                    _ => None,
+                };
+
+                if let Some(c_name) = class_name {
+                    if let Some(class_def) = self.env.classes.get(&c_name).cloned() {
+                        if let Some(prop_ty) = class_def.fields.get(prop_name) {
+                            *expr_type = Some(prop_ty.clone());
+                            Ok(prop_ty.clone())
+                        } else {
+                            Err(TypeError::UnknownProperty(prop_name.clone()))
+                        }
+                    } else {
+                        Err(TypeError::UndefinedClass(c_name))
+                    }
+                } else if let Type::Struct(struct_name) = obj_ty {
                     if let Some(struct_fields) = self.env.structs.get(&struct_name).cloned() {
                         if let Some(prop_ty) = struct_fields.get(prop_name) {
                             *expr_type = Some(prop_ty.clone());
@@ -547,17 +613,6 @@ impl TypeChecker {
                     } else {
                         Err(TypeError::UndefinedStruct(struct_name.clone()))
                     }
-                } else if let Type::Class(class_name) = obj_ty {
-                    if let Some(class_def) = self.env.classes.get(&class_name).cloned() {
-                        if let Some(prop_ty) = class_def.fields.get(prop_name) {
-                            *expr_type = Some(prop_ty.clone());
-                            Ok(prop_ty.clone())
-                        } else {
-                            Err(TypeError::UnknownProperty(prop_name.clone()))
-                        }
-                    } else {
-                        Err(TypeError::UndefinedStruct(class_name.clone()))
-                    }
                 } else if obj_ty == Type::Any {
                     *expr_type = Some(Type::Any);
                     Ok(Type::Any)
@@ -565,12 +620,28 @@ impl TypeChecker {
                     Err(TypeError::UnsupportedOperation(format!("Cannot access property on {:?}", obj_ty)))
                 }
             }
-            Expr::MethodCall(obj_expr, method_name, args, ref mut expr_type) => {
-                let obj_ty = self.get_expr_type(obj_expr)?;
-                if let Type::Class(class_name) = obj_ty {
+            Expr::MethodCall(_, _, _, _) => {
+                let (obj_expr, method_name, mut args, mut opt_type) = match std::mem::replace(expr, Expr::Number(0.0)) {
+                    Expr::MethodCall(o, m, a, t) => (o, m, a, t),
+                    _ => unreachable!(),
+                };
+                
+                let obj_ty = self.get_expr_type(&mut obj_expr.clone())?;
+                let class_name = match &obj_ty {
+                    Type::Class(name) => Some(name.clone()),
+                    Type::Struct(name) => {
+                        if self.env.classes.contains_key(name) {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
+                    },
+                    _ => None,
+                };
+                
+                if let Some(class_name) = class_name {
                     if let Some(class_def) = self.env.classes.get(&class_name).cloned() {
-                        if let Some(sig) = class_def.methods.get(method_name) {
-                            // First param is implicit self
+                        if let Some(sig) = class_def.methods.get(&method_name) {
                             let expected_args = sig.params.len() - 1;
                             if expected_args != args.len() {
                                 return Err(TypeError::InvalidArguments(format!("Expected {} args, got {}", expected_args, args.len())));
@@ -584,16 +655,24 @@ impl TypeChecker {
                                     });
                                 }
                             }
-                            *expr_type = Some(sig.return_type.clone());
+                            
+                            opt_type = Some(sig.return_type.clone());
+                            let mangled_name = format!("{}_{}", class_name, method_name);
+                            
+                            // Insert obj_expr as the first argument (self)
+                            args.insert(0, *obj_expr);
+                            *expr = Expr::Call(mangled_name, args, opt_type);
+                            
                             return Ok(sig.return_type.clone());
                         } else {
                             return Err(TypeError::UndefinedFunction(method_name.clone()));
                         }
                     } else {
-                        return Err(TypeError::UndefinedStruct(class_name.clone()));
+                        return Err(TypeError::UndefinedClass(class_name.clone()));
                     }
                 } else if obj_ty == Type::Any {
-                    *expr_type = Some(Type::Any);
+                    opt_type = Some(Type::Any);
+                    *expr = Expr::Call(method_name, args, opt_type);
                     Ok(Type::Any)
                 } else {
                     return Err(TypeError::UnsupportedOperation(format!("Cannot call method on {:?}", obj_ty)));
