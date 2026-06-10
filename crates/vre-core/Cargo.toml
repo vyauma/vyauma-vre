@@ -15,3 +15,8 @@ libloading = "0.8"
 mio = { version = "1.2.1", features = ["os-poll", "net"] }
 notify = "6.1"
 region = "3.0.0"
+ureq = { version = "2.10", features = ["tls"] }
+tungstenite = { version = "0.24", features = ["native-tls"] }
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
