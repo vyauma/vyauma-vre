@@ -54,15 +54,17 @@ fn main():
 }
 
 #[test]
-fn test_type_error() {
+fn test_string_concat() {
+    // String + Number should produce string concatenation, not a type error
     let script = r#"
 fn main():
-    let x = "string"
-    let y = x + 5
+    let x = "value: "
+    let y = x + 42
+    ffi_console_print(y)
 "#;
-    let (out, err) = run_script(script, "test_type_error");
-    let combined = format!("{}{}", out, err);
-    if !combined.contains("Type mismatch") {
-        panic!("Did not find expected error string. Combined output was:\n{}", combined);
+    let (out, err) = run_script(script, "test_string_concat");
+    if !err.is_empty() && out.is_empty() {
+        panic!("Unexpected error: {}", err);
     }
+    assert!(out.contains("value: 42"), "Expected 'value: 42', got: {}", out);
 }

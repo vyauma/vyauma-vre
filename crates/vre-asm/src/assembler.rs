@@ -197,7 +197,7 @@ impl Assembler {
                 OpCode::EqualI64 | OpCode::NotEqualI64 | OpCode::LessI64 | OpCode::LessEqualI64 | OpCode::GreaterI64 | OpCode::GreaterEqualI64 |
                 OpCode::EqualF32 | OpCode::NotEqualF32 | OpCode::LessF32 | OpCode::LessEqualF32 | OpCode::GreaterF32 | OpCode::GreaterEqualF32 |
                 OpCode::EqualF64 | OpCode::NotEqualF64 | OpCode::LessF64 | OpCode::LessEqualF64 | OpCode::GreaterF64 | OpCode::GreaterEqualF64 |
-                OpCode::EqualStr | OpCode::NotEqualStr |
+                OpCode::EqualStr | OpCode::NotEqualStr | OpCode::AddStr |
                 OpCode::NewArray | OpCode::LoadElement | OpCode::StoreElement | OpCode::NewStruct => {}
 
                 // Jumps
@@ -338,7 +338,7 @@ fn parse_opcode(name: &str) -> Option<OpCode> {
         "equali64" => Some(OpCode::EqualI64), "notequali64" => Some(OpCode::NotEqualI64), "lessi64" => Some(OpCode::LessI64), "lessequali64" => Some(OpCode::LessEqualI64), "greateri64" => Some(OpCode::GreaterI64), "greaterequali64" => Some(OpCode::GreaterEqualI64),
         "equalf32" => Some(OpCode::EqualF32), "notequalf32" => Some(OpCode::NotEqualF32), "lessf32" => Some(OpCode::LessF32), "lessequalf32" => Some(OpCode::LessEqualF32), "greaterf32" => Some(OpCode::GreaterF32), "greaterequalf32" => Some(OpCode::GreaterEqualF32),
         "equalf64" => Some(OpCode::EqualF64), "notequalf64" => Some(OpCode::NotEqualF64), "lessf64" => Some(OpCode::LessF64), "lessequalf64" => Some(OpCode::LessEqualF64), "greaterf64" => Some(OpCode::GreaterF64), "greaterequalf64" => Some(OpCode::GreaterEqualF64),
-        "equalstr" => Some(OpCode::EqualStr), "notequalstr" => Some(OpCode::NotEqualStr),
+        "equalstr" => Some(OpCode::EqualStr), "notequalstr" => Some(OpCode::NotEqualStr), "addstr" => Some(OpCode::AddStr),
         "jump" | "jmp" => Some(OpCode::Jump),
         "jumpif" | "jmpif" => Some(OpCode::JumpIf),
         "call" => Some(OpCode::Call),
@@ -376,7 +376,7 @@ fn instruction_size(instr: &AsmInstruction) -> Result<usize, String> {
                 OpCode::EqualI64 | OpCode::NotEqualI64 | OpCode::LessI64 | OpCode::LessEqualI64 | OpCode::GreaterI64 | OpCode::GreaterEqualI64 |
                 OpCode::EqualF32 | OpCode::NotEqualF32 | OpCode::LessF32 | OpCode::LessEqualF32 | OpCode::GreaterF32 | OpCode::GreaterEqualF32 |
                 OpCode::EqualF64 | OpCode::NotEqualF64 | OpCode::LessF64 | OpCode::LessEqualF64 | OpCode::GreaterF64 | OpCode::GreaterEqualF64 |
-                OpCode::EqualStr | OpCode::NotEqualStr |
+                OpCode::EqualStr | OpCode::NotEqualStr | OpCode::AddStr |
         OpCode::Return | OpCode::Nop | OpCode::Halt | OpCode::Pop | OpCode::Dup |
         OpCode::NewArray | OpCode::LoadElement | OpCode::StoreElement |
         OpCode::NewStruct | OpCode::TryEnd | OpCode::Throw |
