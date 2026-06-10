@@ -110,9 +110,62 @@ pub enum HeapObject {
     Function(usize), // instruction pointer
 }
 
+impl HeapObject {
+    /// Human-readable type label for leak reporting
+    pub fn kind(&self) -> &'static str {
+        match self {
+            HeapObject::Array(_)    => "Array",
+            HeapObject::String(_)   => "String",
+            HeapObject::Struct(_)   => "Struct",
+            HeapObject::Function(_) => "Function",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GcObject {
     pub data: HeapObject,
+    /// Serial number of this allocation (1-based, for diagnostics)
+    pub alloc_id: usize,
+}
+
+/// Summary produced by `Heap::leak_report()`
+#[derive(Debug, Default)]
+pub struct LeakReport {
+    /// Total number of objects still live at report time
+    pub leaked_count: usize,
+    /// Breakdown: how many leaked objects of each kind
+    pub by_kind: HashMap<String, usize>,
+    /// Total bytes allocated during VM lifetime
+    pub total_allocations: usize,
+}
+
+impl LeakReport {
+    pub fn has_leaks(&self) -> bool {
+        self.leaked_count > 0
+    }
+
+    /// Pretty-print the report
+    pub fn format(&self) -> String {
+        if !self.has_leaks() {
+            return format!(
+                "Heap OK — {} allocations, 0 leaks.",
+                self.total_allocations
+            );
+        }
+        let mut lines = vec![
+            format!(
+                "⚠ Heap Leak Detected: {} object(s) not freed (of {} total allocations)",
+                self.leaked_count, self.total_allocations
+            ),
+        ];
+        let mut kinds: Vec<(&String, &usize)> = self.by_kind.iter().collect();
+        kinds.sort_by_key(|(k, _)| k.as_str());
+        for (kind, count) in kinds {
+            lines.push(format!("  • {} × {}", count, kind));
+        }
+        lines.join("\n")
+    }
 }
 
 /// Dynamic Memory Heap
@@ -137,7 +190,8 @@ impl Heap {
     pub fn allocate(&mut self, obj: HeapObject) -> usize {
         self.live_objects += 1;
         self.total_allocations += 1;
-        let gc_obj = GcObject { data: obj };
+        let alloc_id = self.total_allocations;
+        let gc_obj = GcObject { data: obj, alloc_id };
         if let Some(id) = self.free_list.pop() {
             self.objects[id] = Some(gc_obj);
             id
@@ -187,4 +241,30 @@ impl Heap {
             }
         }
     }
+
+    /// Produce a leak report: count all objects still live after execution.
+    /// Call this after the VM halts to detect heap leaks.
+    pub fn leak_report(&self) -> LeakReport {
+        let mut by_kind: HashMap<String, usize> = HashMap::new();
+        let mut leaked_count = 0;
+
+        for slot in &self.objects {
+            if let Some(gc_obj) = slot {
+                leaked_count += 1;
+                *by_kind.entry(gc_obj.data.kind().to_string()).or_insert(0) += 1;
+            }
+        }
+
+        LeakReport {
+            leaked_count,
+            by_kind,
+            total_allocations: self.total_allocations,
+        }
+    }
+
+    /// Quick boolean: are there any live objects still on the heap?
+    pub fn has_leaks(&self) -> bool {
+        self.live_objects > 0
+    }
 }
+

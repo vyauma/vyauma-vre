@@ -29,3 +29,6 @@ pub use capability::registry::CapabilityRegistry;
 
 // Public-facing loader abstraction
 pub use loader::loader::BytecodeLoader;
+
+// Public-facing heap leak detection
+pub use vm::memory::LeakReport;

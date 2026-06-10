@@ -8,7 +8,7 @@ use crate::error::{VreError, VreResult};
 use crate::bytecode::opcode::OpCode;
 
 use super::stack::Stack;
-use super::memory::{Globals, Locals, ConstantPool, Heap, HeapObject};
+use super::memory::{Globals, Locals, ConstantPool, Heap, HeapObject, LeakReport};
 use super::value::Value;
 
 use crate::capability::capability::Capability;
@@ -1195,5 +1195,16 @@ impl VirtualMachine {
     /// Peek the top value of the stack
     pub fn peek_stack(&self) -> VreResult<&Value> {
         self.stack.peek()
+    }
+
+    /// Generate a heap leak report after execution completes.
+    /// Returns a structured summary of all live (un-freed) objects.
+    pub fn leak_report(&self) -> LeakReport {
+        self.heap.leak_report()
+    }
+
+    /// Quick heap stats: (live_objects, total_allocations)
+    pub fn heap_stats(&self) -> (usize, usize) {
+        (self.heap.live_objects, self.heap.total_allocations)
     }
 }

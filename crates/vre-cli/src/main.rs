@@ -13,14 +13,20 @@ use vre_core::{Capability, CapabilityRegistry};
 mod native;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let raw_args: Vec<String> = env::args().collect();
+
+    // Parse flags before the file path
+    let check_leaks = raw_args.iter().any(|a| a == "--check-leaks");
+    let args: Vec<&String> = raw_args.iter()
+        .filter(|a| !a.starts_with("--"))
+        .collect();
 
     if args.len() != 2 {
-        print_usage(&args[0]);
+        print_usage(&raw_args[0]);
         process::exit(1);
     }
 
-    let input_path = &args[1];
+    let input_path = args[1];
 
     let (instructions, constants, native_imports) = if input_path.ends_with(".vym") || input_path.ends_with(".vya") {
         let source = match vre_core::pal::get_pal().read_to_string(std::path::Path::new(input_path)) {
@@ -85,13 +91,29 @@ fn main() {
         vre_core::pal::get_pal().eprintln(&format!("Runtime error: {}", e));
         process::exit(1);
     }
+
+    // Leak detection — always run report, print only if --check-leaks or leaks found
+    let report = vm.leak_report();
+    if report.has_leaks() {
+        let pal = vre_core::pal::get_pal();
+        pal.eprintln("");
+        pal.eprintln(&report.format());
+        if check_leaks {
+            // Non-zero exit when --check-leaks is used and leaks are found
+            process::exit(2);
+        }
+    } else if check_leaks {
+        // Explicit check requested — confirm clean heap
+        vre_core::pal::get_pal().eprintln(&report.format());
+    }
 }
 
 fn print_usage(program_name: &str) {
     println!("Vyauma Runtime Engine (VRE)");
     println!("Usage:");
-    println!("  {} <file.vbc>   - Execute compiled bytecode", program_name);
-    println!("  {} <file.vym>    - Compile and execute Vyauma source", program_name);
+    println!("  {} <file.vbc>              - Execute compiled bytecode", program_name);
+    println!("  {} <file.vym>              - Compile and execute Vyauma source", program_name);
+    println!("  {} <file.vym> --check-leaks - Run and report heap leaks", program_name);
 }
 
 /// Renders a compiler error with a visual `^` pointer to the exact location.
