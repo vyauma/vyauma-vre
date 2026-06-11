@@ -6,4 +6,8 @@ description = "Vyauma Runtime Engine — Compiler from .vym source to VRE byteco
 license = "Apache-2.0"
 
 [dependencies]
+oxc_allocator = "0.126.0"
+oxc_ast = "0.126.0"
+oxc_parser = "0.126.0"
+oxc_span = "0.126.0"
 vre-core = { path = "../vre-core" }

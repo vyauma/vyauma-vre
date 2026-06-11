@@ -83,7 +83,8 @@ impl OptimizationPass for DeadCodeElimination {
                         Instruction::AssignProperty(..) | Instruction::StoreVar(..) | 
                         Instruction::Return(..) | Instruction::Throw(..) | 
                         Instruction::Branch(..) | Instruction::CondBranch(..) |
-                        Instruction::SetupTry(..) | Instruction::PopTry
+                        Instruction::SetupTry(..) | Instruction::PopTry |
+                        Instruction::Yield
                     )
                 });
                 

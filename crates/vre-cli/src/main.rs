@@ -75,6 +75,7 @@ fn main() {
     // Set up Configuration and FFI
     let mut config = VreConfig::default();
     native::register_ffi(&mut config);
+    vre_core::vm::api::register_apis(&mut config);
 
     let mut capabilities = CapabilityRegistry::new();
     

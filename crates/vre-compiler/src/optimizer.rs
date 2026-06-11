@@ -96,7 +96,7 @@ impl AstOptimizer {
                 self.optimize_block(catch_block);
             }
             Stmt::Expr(expr) => self.optimize_expression(expr),
-            Stmt::StructDecl(..) | Stmt::ClassDecl(..) => {}
+            Stmt::StructDecl(..) | Stmt::ClassDecl(..) | Stmt::Yield => {}
         }
     }
 

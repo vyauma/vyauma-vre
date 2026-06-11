@@ -432,23 +432,32 @@ impl VirtualMachine {
                 if *count > 50 {
                     if !self.jit_cache.contains_key(&target) {
                         let mut end = target;
+                        let mut can_jit = true;
                         while end < self.instructions.len() && self.instructions[end] != OpCode::Return as u8 {
-                            // Advance by instruction length
+                            // Advance by instruction length and verify opcodes
                             let op = self.instructions[end];
                             if op == OpCode::Push as u8 { end += 3; }
                             else if op == OpCode::LoadLocal as u8 || op == OpCode::StoreLocal as u8 { end += 2; }
                             else if op == OpCode::Jump as u8 || op == OpCode::JumpIf as u8 { end += 5; }
-                            else if op == OpCode::Call as u8 { end += 7; } 
-                            else if op == OpCode::CallNative as u8 { end += 5; } // u32 native index
-                            else { end += 1; }
+                            else if op == OpCode::AddF64 as u8 || op == OpCode::SubF64 as u8 || 
+                                    op == OpCode::MulF64 as u8 || op == OpCode::DivF64 as u8 ||
+                                    op == OpCode::LessF64 as u8 { end += 1; }
+                            else { 
+                                can_jit = false; 
+                                break; 
+                            }
                         }
-                        if end < self.instructions.len() {
+                        if can_jit && end < self.instructions.len() {
                             end += 1; // Include Return
                             let body = &self.instructions[target..end];
-                            println!("=> [JIT] Compiling function at IP {} into native x86_64 machine code...", target);
+                            println!("=> [JIT] Compiling function at IP {} into native machine code...", target);
                             let mut compiler = crate::jit::compiler::JitCompiler::new();
-                            let mem = compiler.compile(body);
+                            let mem = compiler.compile(body, target);
                             self.jit_cache.insert(target, mem);
+                        } else {
+                            // Bailout for async or unsupported functions
+                            // Set count to a value so we don't try compiling repeatedly (preventing infinite scan overhead)
+                            self.jit_call_counts.insert(target, usize::MAX - 100);
                         }
                     }
 
@@ -1083,6 +1092,22 @@ impl VirtualMachine {
 
         // 1.5. Trace roots (Scheduled tasks)
         for task in self.scheduler.iter_tasks() {
+            for val in task.stack.values() {
+                if let Value::Reference(id) = val {
+                    worklist.push(*id);
+                }
+            }
+            for frame in &task.call_stack {
+                for val in frame.locals.values() {
+                    if let Value::Reference(id) = val {
+                        worklist.push(*id);
+                    }
+                }
+            }
+        }
+
+        // 1.6. Trace roots (Blocked tasks — sleeping / awaiting)
+        for task in self.scheduler.iter_blocked_tasks() {
             for val in task.stack.values() {
                 if let Value::Reference(id) = val {
                     worklist.push(*id);

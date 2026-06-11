@@ -231,6 +231,10 @@ impl Compiler {
                 self.compile_expression(expr)?;
                 self.emit_opcode(OpCode::Throw);
             }
+            Stmt::Yield => {
+                // Suspend the current coroutine task and re-enqueue it
+                self.emit_opcode(OpCode::Yield);
+            }
             Stmt::TryCatch(try_block, catch_param, catch_block) => {
                 self.emit_opcode(OpCode::TryStart);
                 let try_start_offset = self.instructions.len();

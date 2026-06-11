@@ -17,6 +17,7 @@ pub enum TokenKind {
     Catch,
     Throw,
     For,
+    Yield,
 
     // Identifiers and Literals
     Identifier(String),
@@ -86,6 +87,7 @@ impl TokenKind {
             "catch" => TokenKind::Catch,
             "throw" => TokenKind::Throw,
             "for" => TokenKind::For,
+            "yield" => TokenKind::Yield,
             _ => TokenKind::Identifier(ident.to_string()),
         }
     }

@@ -333,6 +333,13 @@ impl<'a> Parser<'a> {
             TokenKind::For => self.parse_for_statement(),
             TokenKind::Try => self.parse_try_catch_statement(),
             TokenKind::Throw => self.parse_throw_statement(),
+            TokenKind::Yield => {
+                // `yield;` — suspend current task
+                if self.peek_token.kind == TokenKind::Semicolon {
+                    self.next_token();
+                }
+                Ok(Stmt::Yield)
+            }
             TokenKind::Identifier(_) if self.peek_token.kind == TokenKind::Assign => self.parse_assign_statement(),
             TokenKind::Identifier(_) if self.peek_token.kind == TokenKind::LBracket => self.parse_assign_index_statement(),
             _ => {

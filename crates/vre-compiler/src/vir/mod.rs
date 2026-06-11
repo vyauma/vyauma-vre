@@ -89,6 +89,9 @@ pub enum Instruction {
     
     Branch(BlockId),
     CondBranch(Value, BlockId, BlockId),
+    
+    /// Cooperatively suspend the current task
+    Yield,
 }
 
 #[derive(Debug, Clone)]

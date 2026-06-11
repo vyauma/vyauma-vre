@@ -916,7 +916,7 @@ class Person:
         let program = parser.parse_program().unwrap();
         assert_eq!(program.classes.len(), 1);
         match &program.classes[0] {
-            Stmt::ClassDecl(name, fields, methods) => {
+            Stmt::ClassDecl(name, fields, methods, _) => {
                 assert_eq!(name, "Person");
                 assert_eq!(fields.len(), 2);
                 assert_eq!(methods.len(), 1);

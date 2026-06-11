@@ -210,6 +210,10 @@ impl VirBuilder {
                 self.switch_to_block(merge_block);
             }
             Stmt::StructDecl(..) | Stmt::ClassDecl(..) => {} // Declarations are handled globally
+            Stmt::Yield => {
+                // Emit a Yield instruction in VIR — suspends the coroutine task
+                self.add_inst(Instruction::Yield);
+            }
         }
     }
     

@@ -7,6 +7,7 @@ pub mod compiler;
 pub mod type_checker;
 pub mod optimizer;
 pub mod vir;
+pub mod ts_frontend;
 use crate::ast::{Program, Expr, Stmt};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -203,7 +204,7 @@ fn mangle_stmt(stmt: &mut Stmt, namespace: &str, local_fns: &std::collections::H
                 mangle_stmt(s, namespace, local_fns);
             }
         }
-        Stmt::Return(None) | Stmt::StructDecl(..) | Stmt::ClassDecl(..) => {}
+        Stmt::Return(None) | Stmt::StructDecl(..) | Stmt::ClassDecl(..) | Stmt::Yield => {}
     }
 }
 

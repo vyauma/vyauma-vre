@@ -61,6 +61,8 @@ pub enum Stmt {
     Throw(Expr),
     For(Box<Stmt>, Expr, Box<Stmt>, Block),
     ClassDecl(String, Vec<(String, Option<Type>)>, Vec<Function>, bool),
+    /// `yield` — suspend the current coroutine task and reschedule it
+    Yield,
 }
 
 pub type Block = Vec<Stmt>;

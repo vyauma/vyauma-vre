@@ -149,7 +149,23 @@ impl Scheduler {
         !self.run_queue.is_empty() || !self.blocked_tasks.is_empty()
     }
 
+    /// Iterate over all tasks in the ready queue (for GC root tracing)
     pub fn iter_tasks(&self) -> impl Iterator<Item = &Task> {
         self.run_queue.iter()
+    }
+
+    /// Iterate over all blocked tasks (for GC root tracing)
+    pub fn iter_blocked_tasks(&self) -> impl Iterator<Item = &Task> {
+        self.blocked_tasks.values()
+    }
+
+    /// Total number of active tasks (ready + blocked)
+    pub fn task_count(&self) -> usize {
+        self.run_queue.len() + self.blocked_tasks.len()
+    }
+
+    /// Check whether a specific task is currently blocked
+    pub fn is_blocked(&self, task_id: u64) -> bool {
+        self.blocked_tasks.contains_key(&task_id)
     }
 }
