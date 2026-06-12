@@ -48,8 +48,10 @@ It is NOT:
 
 ## Recent Highlights
 
-- **Typed Opcodes Engine:** Emits statically typed opcodes like `AddI32` and `LessF64` for faster, type-safe execution, bypassing generic dynamic dispatch in the VM.
-- **Diagnostics:** Full tracking of line and column numbers across tokens and error reports.
+- **Core Engine Complete (Phases 1-30):** The VRE runtime is now fully implemented with comprehensive JIT, Async execution, and strict Capability Sandboxing enforcement.
+- **Multi-Language Support:** Cross-language compilation and FFI execution capabilities natively supporting TypeScript, JavaScript, PHP, and Python codebases.
+- **Ecosystem Tooling:** Shipped full developer tooling including a Package Registry (`vre install`, `vre publish`), Language Server Protocol (LSP), and Debug Adapter Protocol (DAP).
+- **Platform Agnostic & Extensible:** Added foundational support for Cloud, Mobile, Embedded architectures, and WebAssembly, alongside expanding the native Standard Library with Document Database, Regex, and Cryptography utilities.
 
 ---
 
