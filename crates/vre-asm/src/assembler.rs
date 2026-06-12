@@ -260,8 +260,33 @@ impl Assembler {
                     instr_bytes.extend_from_slice(&(target_offset as u32).to_be_bytes());
                 }
 
-                OpCode::Yield | OpCode::Await => {}
+                OpCode::Yield | OpCode::Await | OpCode::SpawnDynamic => {}
                 OpCode::AndBool | OpCode::OrBool => {}
+
+                OpCode::NewClosure => {
+                    // u32 func addr + u16 upvalue count
+                    let target_offset = self.resolve_label_or_u32(&instr.operands[0])?;
+                    let upcount = parse_u16_operand(&instr.operands[1])?;
+                    instr_bytes.extend_from_slice(&(target_offset as u32).to_be_bytes());
+                    instr_bytes.extend_from_slice(&upcount.to_be_bytes());
+                }
+                OpCode::CallDynamic => {
+                    // u16 arg_count + u16 local_count
+                    let ac = parse_u16_operand(&instr.operands[0])?;
+                    let lc = parse_u16_operand(&instr.operands[1])?;
+                    instr_bytes.extend_from_slice(&ac.to_be_bytes());
+                    instr_bytes.extend_from_slice(&lc.to_be_bytes());
+                }
+                OpCode::LoadUpvalue | OpCode::StoreUpvalue | OpCode::BoxValue | OpCode::LoadBox | OpCode::StoreBox => {
+                    // These take 0 operands in assembly (they pop/push from stack)
+                }
+                OpCode::ImportModule | OpCode::ExportValue => {
+                    // Single u16 operand: constant-pool index of the path/name string
+                    if !instr.operands.is_empty() {
+                        let idx = parse_u16_operand(&instr.operands[0])?;
+                        instr_bytes.extend_from_slice(&idx.to_be_bytes());
+                    }
+                }
             }
         }
 
@@ -347,6 +372,7 @@ fn parse_opcode(name: &str) -> Option<OpCode> {
         "syscall" => Some(OpCode::Syscall),
         "halt" => Some(OpCode::Halt),
         "spawn" => Some(OpCode::Spawn),
+        "spawndynamic" => Some(OpCode::SpawnDynamic),
         "yield" => Some(OpCode::Yield),
         "and_bool" => Some(OpCode::AndBool),
         "or_bool" => Some(OpCode::OrBool),
@@ -358,6 +384,13 @@ fn parse_opcode(name: &str) -> Option<OpCode> {
         "load_property" => Some(OpCode::LoadProperty),
         "store_property" => Some(OpCode::StoreProperty),
         "callnative" => Some(OpCode::CallNative),
+        "calldynamic" => Some(OpCode::CallDynamic),
+        "newclosure" => Some(OpCode::NewClosure),
+        "loadupvalue" => Some(OpCode::LoadUpvalue),
+        "storeupvalue" => Some(OpCode::StoreUpvalue),
+        "boxvalue" => Some(OpCode::BoxValue),
+        "loadbox" => Some(OpCode::LoadBox),
+        "storebox" => Some(OpCode::StoreBox),
         "trystart" => Some(OpCode::TryStart),
         "tryend" => Some(OpCode::TryEnd),
         "throw" => Some(OpCode::Throw),
@@ -380,7 +413,9 @@ fn instruction_size(instr: &AsmInstruction) -> Result<usize, String> {
         OpCode::Return | OpCode::Nop | OpCode::Halt | OpCode::Pop | OpCode::Dup |
         OpCode::NewArray | OpCode::LoadElement | OpCode::StoreElement |
         OpCode::NewStruct | OpCode::TryEnd | OpCode::Throw |
-        OpCode::Yield | OpCode::Await => Ok(1),
+        OpCode::Yield | OpCode::Await |
+        OpCode::LoadUpvalue | OpCode::StoreUpvalue |
+        OpCode::BoxValue | OpCode::LoadBox | OpCode::StoreBox => Ok(1),
         OpCode::AndBool | OpCode::OrBool => Ok(1),
 
         // Opcode + u8
@@ -393,10 +428,17 @@ fn instruction_size(instr: &AsmInstruction) -> Result<usize, String> {
         OpCode::Jump | OpCode::JumpIf | OpCode::TryStart | OpCode::Spawn => Ok(5),
 
         // Opcode + u32 + u16
-        OpCode::Call => Ok(7),
+        OpCode::Call | OpCode::NewClosure => Ok(7),
+
+        // Opcode + u16 + u16
+        OpCode::CallDynamic => Ok(5),
+        OpCode::SpawnDynamic => Ok(1),
 
         // Opcode + u16 + u8 + 3 bytes padding
         OpCode::CallNative => Ok(7),
+
+        // Module system: opcode + u16 constant-pool index
+        OpCode::ImportModule | OpCode::ExportValue => Ok(3),
     }
 }
 

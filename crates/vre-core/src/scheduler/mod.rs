@@ -23,12 +23,18 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn new(id: u64, entry_ip: usize, stack_size: usize) -> Self {
+    pub fn new(id: u64, entry_ip: usize, stack_size: usize, local_count: usize) -> Self {
+        let mut call_stack = Vec::new();
+        call_stack.push(crate::vm::vm::CallFrame {
+            return_ip: usize::MAX, // Sentinel for root frame
+            locals: crate::vm::memory::Locals::new(local_count),
+            closure_id: None,
+        });
         Task {
             id,
             ip: entry_ip,
             stack: Stack::new(stack_size),
-            call_stack: Vec::new(),
+            call_stack,
             state: TaskState::Ready,
         }
     }
@@ -73,8 +79,8 @@ impl Scheduler {
         }
     }
 
-    pub fn spawn(&mut self, entry_ip: usize, stack_size: usize) -> u64 {
-        let task = Task::new(self.next_task_id, entry_ip, stack_size);
+    pub fn spawn(&mut self, entry_ip: usize, stack_size: usize, local_count: usize) -> u64 {
+        let task = Task::new(self.next_task_id, entry_ip, stack_size, local_count);
         let id = task.id;
         self.next_task_id += 1;
         self.run_queue.push_back(task);
@@ -105,7 +111,15 @@ impl Scheduler {
         }
     }
 
-    pub fn schedule_timer(&mut self, mut task: Task, delay_ms: u64) {
+    pub fn remove_from_run_queue(&mut self, task_id: u64) -> Option<Task> {
+        if let Some(pos) = self.run_queue.iter().position(|t| t.id == task_id) {
+            self.run_queue.remove(pos)
+        } else {
+            None
+        }
+    }
+
+    pub fn schedule_timer(&mut self, task: Task, delay_ms: u64) {
         let task_id = task.id;
         self.block_task(task);
         let wake_time = Instant::now() + Duration::from_millis(delay_ms);
@@ -135,7 +149,7 @@ impl Scheduler {
         })
     }
 
-    pub fn await_task(&mut self, mut task: Task, target_task_id: u64) {
+    pub fn await_task(&mut self, task: Task, target_task_id: u64) {
         let task_id = task.id;
         self.block_task(task);
         self.task_waiters.entry(target_task_id).or_insert_with(Vec::new).push(task_id);
@@ -146,7 +160,7 @@ impl Scheduler {
     }
 
     pub fn has_active_tasks(&self) -> bool {
-        !self.run_queue.is_empty() || !self.blocked_tasks.is_empty()
+        !self.run_queue.is_empty() || !self.blocked_tasks.is_empty() || !self.timer_queue.is_empty()
     }
 
     /// Iterate over all tasks in the ready queue (for GC root tracing)

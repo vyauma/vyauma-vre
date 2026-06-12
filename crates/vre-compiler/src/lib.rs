@@ -8,6 +8,9 @@ pub mod type_checker;
 pub mod optimizer;
 pub mod vir;
 pub mod ts_frontend;
+pub mod php_frontend;
+pub mod py_frontend;
+
 use crate::ast::{Program, Expr, Stmt};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -19,6 +22,24 @@ use std::collections::HashSet;
 pub use crate::compiler::CompiledProgram;
 
 pub fn compile(source: &str, path_str: &str, base_path: Option<&Path>) -> Result<CompiledProgram, String> {
+    if path_str.ends_with(".js") || path_str.ends_with(".ts") {
+        let module = ts_frontend::compile_ts_to_vir(source, path_str)?;
+        let codegen = vir::codegen::VirCodegen::new();
+        return codegen.generate(module);
+    }
+    
+    if path_str.ends_with(".php") {
+        let module = php_frontend::compile_php_to_vir(source, path_str)?;
+        let codegen = vir::codegen::VirCodegen::new();
+        return codegen.generate(module);
+    }
+
+    if path_str.ends_with(".py") {
+        let module = py_frontend::compile_py_to_vir(source, path_str)?;
+        let codegen = vir::codegen::VirCodegen::new();
+        return codegen.generate(module);
+    }
+
     let mut visited = HashSet::new();
     let mut program = parse_and_resolve(source, path_str, base_path, &mut visited)?;
     
@@ -78,12 +99,22 @@ fn parse_and_resolve(
                 ));
             }
         } else {
-            // Package resolution from vyauma_modules
-            let mut p = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            p.push("vyauma_modules");
-            p.push(&import_decl.path);
-            p.push("index.vym");
-            p
+            // Package resolution from vyauma_modules (respects VRE_MODULES_PATH env var)
+            let modules_root = std::env::var("VRE_MODULES_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| {
+                    let mut p = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                    p.push("vyauma_modules");
+                    p
+                });
+            // Try index.vym first, fall back to index.vya
+            let candidate_vym = modules_root.join(&import_decl.path).join("index.vym");
+            let candidate_vya = modules_root.join(&import_decl.path).join("index.vya");
+            if candidate_vym.exists() {
+                candidate_vym
+            } else {
+                candidate_vya
+            }
         };
 
         let canonical = match vre_core::pal::get_pal().canonicalize(&import_path) {

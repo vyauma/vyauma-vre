@@ -62,6 +62,14 @@ impl Stack {
         self.values.is_empty()
     }
 
+    pub fn get(&self, index: usize) -> Option<&Value> {
+        self.values.get(index)
+    }
+
+    pub fn remove(&mut self, index: usize) -> Value {
+        self.values.remove(index)
+    }
+
     /// Truncate the stack to a specific depth
     pub fn truncate(&mut self, depth: usize) {
         self.values.truncate(depth);

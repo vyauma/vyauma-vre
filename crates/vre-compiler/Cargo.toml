@@ -10,4 +10,6 @@ oxc_allocator = "0.126.0"
 oxc_ast = "0.126.0"
 oxc_parser = "0.126.0"
 oxc_span = "0.126.0"
+php-parser-rs = "0.1.3"
+rustpython-parser = "0.4.0"
 vre-core = { path = "../vre-core" }

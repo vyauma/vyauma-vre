@@ -48,12 +48,14 @@ pub enum OpCode {
 
     // Control flow
     Jump     = 0x60,
-    JumpIf  = 0x61,
-    Call    = 0x62,
-    Return  = 0x63,
-    Spawn   = 0x64,
-    Yield   = 0x65,
-    Await   = 0x66,
+    JumpIf   = 0x61,
+    Call     = 0x62,
+    Return   = 0x63,
+    Spawn    = 0x64,
+    Yield    = 0x65,
+    Await    = 0x66,
+    CallDynamic = 0x67,
+    SpawnDynamic = 0x68,
 
     // Heap and Objects
     NewArray     = 0x70,
@@ -63,13 +65,24 @@ pub enum OpCode {
     LoadProperty  = 0x74,
     StoreProperty = 0x75,
 
-    // FFI Native Call
     CallNative = 0x76,
+    NewClosure = 0x77,
+    LoadUpvalue = 0x78,
+    StoreUpvalue = 0x79,
+    BoxValue = 0x7A,
+    LoadBox = 0x7B,
+    StoreBox = 0x7C,
 
     // Exception Handling
     TryStart = 0x80,
     TryEnd   = 0x81,
     Throw    = 0x82,
+
+    // Module System
+    /// Load a module by path (constant string operand). Pushes the module's export namespace dict.
+    ImportModule = 0x90,
+    /// Register a named export from the current module (constant string operand + stack top value).
+    ExportValue  = 0x91,
 
     // System
     Nop     = 0xF0,
@@ -113,6 +126,8 @@ impl OpCode {
             0x64 => Some(OpCode::Spawn),
             0x65 => Some(OpCode::Yield),
             0x66 => Some(OpCode::Await),
+            0x67 => Some(OpCode::CallDynamic),
+            0x68 => Some(OpCode::SpawnDynamic),
 
             0x70 => Some(OpCode::NewArray),
             0x71 => Some(OpCode::LoadElement),
@@ -121,10 +136,19 @@ impl OpCode {
             0x74 => Some(OpCode::LoadProperty),
             0x75 => Some(OpCode::StoreProperty),
             0x76 => Some(OpCode::CallNative),
+            0x77 => Some(OpCode::NewClosure),
+            0x78 => Some(OpCode::LoadUpvalue),
+            0x79 => Some(OpCode::StoreUpvalue),
+            0x7A => Some(OpCode::BoxValue),
+            0x7B => Some(OpCode::LoadBox),
+            0x7C => Some(OpCode::StoreBox),
 
             0x80 => Some(OpCode::TryStart),
             0x81 => Some(OpCode::TryEnd),
             0x82 => Some(OpCode::Throw),
+
+            0x90 => Some(OpCode::ImportModule),
+            0x91 => Some(OpCode::ExportValue),
 
             0xF0 => Some(OpCode::Nop),
             0xF1 => Some(OpCode::Syscall),

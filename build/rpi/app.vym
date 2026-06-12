@@ -1,0 +1,104 @@
+import "stdlib/net.vy"
+import "stdlib/io.vy"
+import "stdlib/string.vy"
+import "stdlib/http.vy"
+import "stdlib/json.vy"
+
+fn main() {
+    let port = 8085;
+    let server = create_server(port);
+    if server == 0 {
+        print("Failed to bind server");
+        return 1;
+    }
+    
+    // Server is automatically registered with mio inside create_server
+    
+    let max_clients = 10;
+    let clients = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    print("Vyauma Web Server listening on port 8085 with mio Event Loop...");
+    
+    let running = 1;
+    while running == 1 {
+        
+        let events = poll_events();
+        let num_events = ffi_array_len(events);
+        
+        let e_idx = 0;
+        while e_idx < num_events {
+            let fd = events[e_idx];
+            
+            if fd == server.fd {
+                // New connection incoming
+                let new_client = accept_client(server);
+                if new_client != 0 {
+                    print("New connection!");
+                    
+                    let slot = 0;
+                    let found = 0;
+                    while slot < max_clients {
+                        if found == 0 {
+                            if clients[slot] == 0 {
+                                clients[slot] = new_client;
+                                found = 1;
+                            }
+                        }
+                        slot = slot + 1;
+                    }
+                    if found == 0 {
+                        close_conn(new_client);
+                    }
+                }
+            } else {
+                // Find matching client
+                let c_idx = 0;
+                while c_idx < max_clients {
+                    if clients[c_idx] != 0 {
+                        let client = clients[c_idx];
+                        if client.fd == fd {
+                            let data = read_all(client);
+                            if data != "" {
+                                let req = parse_http_request(data);
+                                let method = req["method"];
+                                let path = req["path"];
+                                
+                                if method == "GET" {
+                                    if path == "/" {
+                                        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nWelcome to Vyauma Event Loop!";
+                                        write_all(client, response);
+                                    } else {
+                                        let response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
+                                        write_all(client, response);
+                                    }
+                                } else {
+                                    if method == "POST" {
+                                        if starts_with(path, "/api/users") {
+                                            let body_str = req["body"];
+                                            let json_data = json_parse(body_str);
+                                            json_data["status"] = "created";
+                                            json_data["server"] = "Vyauma/EventLoop";
+                                            
+                                            let resp_json = json_stringify(json_data);
+                                            let response = "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\n\r\n";
+                                            write_all(client, response);
+                                            write_all(client, resp_json);
+                                        } else {
+                                            let response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
+                                            write_all(client, response);
+                                        }
+                                    }
+                                }
+                                close_conn(client);
+                                clients[c_idx] = 0;
+                            }
+                        }
+                    }
+                    c_idx = c_idx + 1;
+                }
+            }
+            e_idx = e_idx + 1;
+        }
+    }
+    
+    return 0;
+}

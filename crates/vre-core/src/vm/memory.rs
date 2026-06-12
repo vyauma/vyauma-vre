@@ -108,6 +108,8 @@ pub enum HeapObject {
     String(String),
     Struct(HashMap<String, Value>),
     Function(usize), // instruction pointer
+    Box(Value),      // boxed value for closures
+    Closure(usize, Vec<usize>), // instruction pointer, upvalue heap ids
 }
 
 impl HeapObject {
@@ -118,6 +120,8 @@ impl HeapObject {
             HeapObject::String(_)   => "String",
             HeapObject::Struct(_)   => "Struct",
             HeapObject::Function(_) => "Function",
+            HeapObject::Box(_)      => "Box",
+            HeapObject::Closure(_, _) => "Closure",
         }
     }
 }

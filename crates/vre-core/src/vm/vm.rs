@@ -13,12 +13,37 @@ use super::value::Value;
 
 use crate::capability::capability::Capability;
 use crate::capability::registry::CapabilityRegistry;
+use crate::module::ModuleCache;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::fs::File;
 use mio::{Events, Poll, Token, Interest};
 use mio::net::{TcpStream, TcpListener};
 use std::net::SocketAddr;
+
+/// A compiled module ready to be loaded into a child VM.
+pub struct CompiledModule {
+    pub instructions: Vec<u8>,
+    pub constants: Vec<Value>,
+    pub native_imports: Vec<String>,
+    pub function_table: HashMap<String, u32>,
+}
+
+/// Trait for compiling and resolving module paths at runtime.
+/// Implemented by vre-cli (which depends on both vre-core and vre-compiler),
+/// breaking the circular dependency that would arise from vre-core importing vre-compiler.
+pub trait ModuleLoader: Send + Sync {
+    /// Resolve `path` (possibly relative to `base_dir`) and return compiled bytecode.
+    fn load(&self, path: &str, base_dir: Option<&str>) -> Result<CompiledModule, String>;
+}
+
+/// A no-op loader used when runtime import is not required (e.g. pure-bytecode execution).
+pub struct NoOpModuleLoader;
+impl ModuleLoader for NoOpModuleLoader {
+    fn load(&self, path: &str, _base_dir: Option<&str>) -> Result<CompiledModule, String> {
+        Err(format!("ImportModule: no module loader registered; cannot load '{}'", path))
+    }
+}
 
 /// IO Resource handle
 #[derive(Debug)]
@@ -35,6 +60,7 @@ pub type NativeFunction = fn(&mut Heap, Vec<Value>) -> Result<Value, String>;
 pub struct CallFrame {
     pub return_ip: usize,
     pub locals: Locals,
+    pub closure_id: Option<usize>, // points to HeapObject::Closure if this frame is a closure
 }
 
 #[derive(Debug)]
@@ -67,7 +93,7 @@ pub struct VirtualMachine {
 
     resources: HashMap<usize, Resource>,
     next_fd: usize,
-    pub native_functions: Vec<NativeFunction>,
+    pub native_functions: Vec<crate::config::FfiBinding>,
     pub native_names: Vec<String>,
     poll: Poll,
     events: Events,
@@ -77,6 +103,17 @@ pub struct VirtualMachine {
     // JIT specific fields
     pub jit_call_counts: HashMap<usize, usize>,
     jit_cache: HashMap<usize, crate::jit::memory::JitMemory>,
+    
+    pub function_table: HashMap<String, u32>,
+    
+    /// Runtime module cache — prevents re-compilation of already-loaded modules
+    module_cache: ModuleCache,
+    
+    /// Pending exports for the current module being executed
+    pub pending_exports: HashMap<String, Value>,
+
+    /// Pluggable module loader (injected by vre-cli to avoid circular deps)
+    module_loader: Box<dyn ModuleLoader>,
 }
 
 impl VirtualMachine {
@@ -90,12 +127,13 @@ impl VirtualMachine {
         constants: Vec<Value>,
         native_imports: Vec<String>,
         capabilities: CapabilityRegistry,
+        function_table: HashMap<String, u32>,
     ) -> Result<Self, String> {
         let mut native_functions = Vec::new();
         let mut native_names = Vec::new();
         for import in native_imports {
-            if let Some(func) = config.ffi_functions.get(&import) {
-                native_functions.push(*func);
+            if let Some(binding) = config.ffi_functions.get(&import) {
+                native_functions.push(binding.clone());
                 native_names.push(import);
             } else {
                 return Err(format!("Unresolved FFI native import: {}", import));
@@ -125,11 +163,20 @@ impl VirtualMachine {
             native_functions,
             native_names,
             poll,
-            events: Events::with_capacity(128),
+            events: _events,
             exception_handlers: Vec::new(),
-            jit_call_counts: HashMap::new(),
             jit_cache: HashMap::new(),
+            jit_call_counts: HashMap::new(),
+            function_table,
+            module_cache: ModuleCache::new(),
+            pending_exports: HashMap::new(),
+            module_loader: Box::new(NoOpModuleLoader),
         })
+    }
+
+    /// Inject a module loader after construction (called by vre-cli).
+    pub fn set_module_loader(&mut self, loader: Box<dyn ModuleLoader>) {
+        self.module_loader = loader;
     }
 
     /// Execute bytecode until halt or error
@@ -473,6 +520,7 @@ impl VirtualMachine {
                 let frame = CallFrame {
                     return_ip: self.ip,
                     locals: Locals::new(local_count),
+                    closure_id: None,
                 };
                 self.call_stack.push(frame);
                 self.ip = target;
@@ -480,39 +528,73 @@ impl VirtualMachine {
             }
 
             OpCode::Return => {
-                match self.call_stack.pop() {
+                let is_root_frame = match self.call_stack.pop() {
                     Some(frame) => {
-                        self.ip = frame.return_ip;
-                        Ok(())
+                        if frame.return_ip == usize::MAX {
+                            true
+                        } else {
+                            self.ip = frame.return_ip;
+                            false
+                        }
                     }
-                    None => {
-                        // Return from top-level — task complete!
-                        let result = self.stack.pop().unwrap_or(Value::Null);
-                        let completed_id = self.current_task_id;
-                        
-                        if let Some(waiters) = self.scheduler.task_waiters.remove(&completed_id) {
-                            for waiter_id in waiters {
-                                if let Some(mut waiter_task) = self.scheduler.blocked_tasks.remove(&waiter_id) {
-                                    // Push the result onto the waiting task's stack
-                                    waiter_task.stack.push(result.clone())?;
-                                    waiter_task.state = crate::scheduler::TaskState::Ready;
-                                    self.scheduler.yield_task(waiter_task);
-                                }
+                    None => true,
+                };
+
+                if is_root_frame {
+                    // Return from top-level — task complete!
+                    let result = self.stack.pop().unwrap_or(Value::Null);
+                    let completed_id = self.current_task_id;
+                    
+                    if let Some(waiters) = self.scheduler.task_waiters.remove(&completed_id) {
+                        for waiter_id in waiters {
+                            if let Some(mut waiter_task) = self.scheduler.blocked_tasks.remove(&waiter_id) {
+                                // Push the result onto the waiting task's stack
+                                waiter_task.stack.push(result.clone())?;
+                                waiter_task.state = crate::scheduler::TaskState::Ready;
+                                self.scheduler.yield_task(waiter_task);
                             }
                         }
-
-                        if !self.resume_next_task() {
-                            self.current_task_id = u64::MAX;
-                        }
-                        Ok(())
                     }
+
+                    if !self.resume_next_task() {
+                        self.current_task_id = u64::MAX;
+                    }
+                    Ok(())
+                } else {
+                    Ok(())
                 }
             }
 
             OpCode::Spawn => {
                 let target = self.read_u32()? as usize;
                 // Create task and push to ready queue
-                let task_id = self.scheduler.spawn(target, self.config.max_stack_size);
+                let task_id = self.scheduler.spawn(target, self.config.max_stack_size, 256);
+                self.stack.push(Value::Int64(task_id as i64))?;
+                Ok(())
+            }
+
+            OpCode::SpawnDynamic => {
+                let target_val = self.stack.pop()?;
+                let (target_ip, closure_id_opt) = match target_val {
+                    Value::Reference(id) => {
+                        match self.heap.get(id)? {
+                            HeapObject::Closure(ip, _) => (*ip, Some(id)),
+                            _ => return Err(VreError::TypeMismatch),
+                        }
+                    }
+                    Value::Int64(ip)   => (ip as usize, None),
+                    Value::Int32(ip)   => (ip as usize, None),
+                    Value::Float64(ip) => (ip as usize, None),
+                    _ => panic!("SpawnDynamic type mismatch! target_val: {:?}", target_val),
+                };
+                let task_id = self.scheduler.spawn(target_ip, self.config.max_stack_size, 256);
+                // Also need to set the closure ID on the root frame of the newly spawned task
+                if let Some(mut task) = self.scheduler.remove_from_run_queue(task_id) {
+                    if let Some(frame) = task.call_stack.last_mut() {
+                        frame.closure_id = closure_id_opt;
+                    }
+                    self.scheduler.yield_task(task);
+                }
                 self.stack.push(Value::Int64(task_id as i64))?;
                 Ok(())
             }
@@ -551,6 +633,98 @@ impl VirtualMachine {
                 Ok(())
             }
 
+            OpCode::CallDynamic => {
+                let local_count = self.read_u16()? as usize;
+                // Ignore the 3 bytes of padding from the 6-byte Call operand space
+                self.ip += 3;
+                let target_val = self.stack.pop()?;
+                let closure_id = match target_val {
+                    Value::Reference(id) => id,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+                let target_ip = match self.heap.get(closure_id)? {
+                    HeapObject::Closure(ip, _) => *ip,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+                let frame = CallFrame {
+                    return_ip: self.ip,
+                    locals: Locals::new(local_count),
+                    closure_id: Some(closure_id),
+                };
+                self.call_stack.push(frame);
+                self.ip = target_ip;
+                Ok(())
+            }
+
+            OpCode::NewClosure => {
+                let target = self.read_u32()? as usize;
+                let upvalue_count = self.read_u8()? as usize;
+                let mut upvalues = Vec::new();
+                for _ in 0..upvalue_count {
+                    let heap_id = match self.stack.pop()? {
+                        Value::Reference(id) => id,
+                        _ => return Err(VreError::TypeMismatch),
+                    };
+                    upvalues.push(heap_id);
+                }
+                upvalues.reverse();
+                let id = self.heap.allocate(HeapObject::Closure(target, upvalues));
+                self.stack.push(Value::Reference(id))?;
+                Ok(())
+            }
+
+            OpCode::LoadUpvalue => {
+                let index = self.read_u16()? as usize;
+                let closure_id = self.call_stack.last().and_then(|f| f.closure_id).ok_or(VreError::RuntimeFault)?;
+                if let HeapObject::Closure(_, upvalues) = self.heap.get(closure_id)? {
+                    let box_id = upvalues[index];
+                    if let HeapObject::Box(val) = self.heap.get(box_id)? {
+                        self.stack.push(val.clone())?;
+                    } else { return Err(VreError::TypeMismatch); }
+                } else { return Err(VreError::TypeMismatch); }
+                Ok(())
+            }
+
+            OpCode::StoreUpvalue => {
+                let index = self.read_u16()? as usize;
+                let val = self.stack.pop()?;
+                let closure_id = self.call_stack.last().and_then(|f| f.closure_id).ok_or(VreError::RuntimeFault)?;
+                if let HeapObject::Closure(_, upvalues) = self.heap.get(closure_id)? {
+                    let box_id = upvalues[index];
+                    if let HeapObject::Box(ref mut box_val) = self.heap.get_mut(box_id)? {
+                        *box_val = val;
+                    } else { return Err(VreError::TypeMismatch); }
+                } else { return Err(VreError::TypeMismatch); }
+                Ok(())
+            }
+
+            OpCode::BoxValue => {
+                let val = self.stack.pop()?;
+                let id = self.heap.allocate(HeapObject::Box(val));
+                self.stack.push(Value::Reference(id))?;
+                Ok(())
+            }
+
+            OpCode::LoadBox => {
+                let val = self.stack.pop()?;
+                if let Value::Reference(id) = val {
+                    if let HeapObject::Box(inner) = self.heap.get(id)? {
+                        self.stack.push(inner.clone())?;
+                    } else { return Err(VreError::TypeMismatch); }
+                } else { return Err(VreError::TypeMismatch); }
+                Ok(())
+            }
+
+            OpCode::StoreBox => {
+                let val = self.stack.pop()?;
+                let target = self.stack.pop()?;
+                if let Value::Reference(id) = target {
+                    if let HeapObject::Box(ref mut inner) = self.heap.get_mut(id)? {
+                        *inner = val;
+                    } else { return Err(VreError::TypeMismatch); }
+                } else { return Err(VreError::TypeMismatch); }
+                Ok(())
+            }
             OpCode::CallNative => {
                 let native_idx = self.read_u16()? as usize;
                 let arg_count = self.read_u8()? as usize;
@@ -582,9 +756,110 @@ impl VirtualMachine {
                     self.capabilities.require(&Capability::new("sys.process"))?;
                 } else if func_name.starts_with("ffi_env_") {
                     self.capabilities.require(&Capability::new("sys.env"))?;
+                } else if func_name.starts_with("ffi_db_") {
+                    self.capabilities.require(&Capability::new("db.access"))?;
                 }
 
-                let func = self.native_functions[native_idx];
+                if func_name == "ffi_task_spawn" {
+                    if args.len() != 1 { return Err(VreError::NativeFunctionError("ffi_task_spawn requires 1 argument".to_string())); }
+                    let target_val = args.pop().unwrap();
+                    let fn_name = match target_val {
+                        Value::String(s) => s,
+                        _ => return Err(VreError::TypeMismatch),
+                    };
+                    let entry_ip = self.function_table.get(&fn_name).copied()
+                        .ok_or_else(|| VreError::NativeFunctionError(
+                            format!("ffi_task_spawn: unknown function '{}'", fn_name)
+                        ))? as usize;
+                    let task_id = self.scheduler.spawn(entry_ip, self.config.max_stack_size, 256);
+                    self.stack.push(Value::Int64(task_id as i64))?;
+                    // Yield so the spawned task can start immediately
+                    self.yield_current_task();
+                    if !self.resume_next_task() {
+                        self.resume_next_task(); // Pop the task we just yielded
+                    }
+                    return Ok(());
+                }
+
+                if func_name == "ffi_task_sleep" {
+                    if args.len() != 1 { return Err(VreError::NativeFunctionError("ffi_task_sleep requires 1 argument".to_string())); }
+                    let delay_val = args.pop().unwrap();
+                    let delay_ms = match delay_val {
+                        Value::Int64(d) => d as u64,
+                        Value::Int32(d) => d as u64,
+                        Value::Float64(d) => d as u64,
+                        _ => return Err(VreError::TypeMismatch),
+                    };
+                    
+                    self.stack.push(Value::Null)?;
+                    let task = crate::scheduler::Task {
+                        id: self.current_task_id,
+                        ip: self.ip,
+                        stack: std::mem::replace(&mut self.stack, Stack::new(0)),
+                        call_stack: std::mem::take(&mut self.call_stack),
+                        state: crate::scheduler::TaskState::Blocked,
+                    };
+                    self.scheduler.schedule_timer(task, delay_ms);
+                    self.current_task_id = u64::MAX;
+                    
+                    if !self.resume_next_task() {}
+                    return Ok(());
+                }
+
+                if func_name == "ffi_task_await" {
+                    if args.len() != 1 { return Err(VreError::NativeFunctionError("ffi_task_await requires 1 argument".to_string())); }
+                    let target_id_val = args.pop().unwrap();
+                    let target_id = match target_id_val {
+                        Value::Int64(id) => id as u64,
+                        Value::Int32(id) => id as u64,
+                        Value::Float64(id) => id as u64,
+                        _ => return Err(VreError::TypeMismatch),
+                    };
+                    
+                    let task = crate::scheduler::Task {
+                        id: self.current_task_id,
+                        ip: self.ip,
+                        stack: std::mem::replace(&mut self.stack, Stack::new(0)),
+                        call_stack: std::mem::take(&mut self.call_stack),
+                        state: crate::scheduler::TaskState::Blocked,
+                    };
+                    self.scheduler.await_task(task, target_id);
+                    self.current_task_id = u64::MAX;
+                    
+                    if !self.resume_next_task() {}
+                    return Ok(());
+                }
+
+                if func_name == "ffi_set_timeout" {
+                    if args.len() != 2 { return Err(VreError::NativeFunctionError("ffi_set_timeout requires 2 arguments (function_name, delay_ms)".to_string())); }
+                    let delay_val = args.pop().unwrap();
+                    let delay_ms = match delay_val {
+                        Value::Int64(d) => d as u64,
+                        Value::Int32(d) => d as u64,
+                        Value::Float64(d) => d as u64,
+                        _ => return Err(VreError::TypeMismatch),
+                    };
+                    
+                    let fn_name_val = args.pop().unwrap();
+                    let fn_name = match fn_name_val {
+                        Value::String(s) => s,
+                        _ => return Err(VreError::TypeMismatch),
+                    };
+                    let entry_ip = self.function_table.get(&fn_name).copied()
+                        .ok_or_else(|| VreError::NativeFunctionError(
+                            format!("ffi_set_timeout: unknown function '{}'", fn_name)
+                        ))? as usize;
+                    
+                    let task_id = self.scheduler.spawn(entry_ip, self.config.max_stack_size, 256);
+                    let spawned_task = self.scheduler.remove_from_run_queue(task_id).unwrap();
+                    self.scheduler.schedule_timer(spawned_task, delay_ms);
+                    
+                    self.stack.push(Value::Int64(task_id as i64))?;
+                    return Ok(());
+                }
+
+                let binding = &self.native_functions[native_idx];
+                let func = binding.func;
                 let result = match func(&mut self.heap, args) {
                     Ok(v) => v,
                     Err(e) => return Err(VreError::NativeFunctionError(e)),
@@ -611,6 +886,70 @@ impl VirtualMachine {
             OpCode::Throw => {
                 let err_val = self.stack.pop()?;
                 self.execute_throw(err_val)
+            }
+
+            // ── Module System ──────────────────────────────────────────────
+            OpCode::ImportModule => {
+                // Operand: u16 constant-pool index of the module path string
+                let path_idx = self.read_u16()? as usize;
+                let module_path = match self.constants.get(path_idx)? {
+                    Value::String(s) => s,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+
+                // Canonicalize the path to use as a cache key
+                let resolved_path = std::path::Path::new(&module_path)
+                    .canonicalize()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| module_path.clone());
+
+                // Cache hit — push cached exports as a Struct value
+                if self.module_cache.contains(&resolved_path) {
+                    let exports = self.module_cache.get(&resolved_path).unwrap().clone();
+                    let struct_id = self.heap.allocate(HeapObject::Struct(exports));
+                    return self.stack.push(Value::Reference(struct_id));
+                }
+
+                // Determine base dir from current working directory
+                let base_dir = std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string());
+
+                // Cache miss — delegate to the injected module loader
+                let compiled = self.module_loader
+                    .load(&module_path, base_dir.as_deref())
+                    .map_err(|e| VreError::NativeFunctionError(e))?;
+
+                // Build child VM — share config/capabilities but with a fresh heap/stack
+                let mut child_vm = VirtualMachine::new(
+                    self.config.clone(),
+                    compiled.instructions,
+                    compiled.constants,
+                    compiled.native_imports,
+                    self.capabilities.clone(),
+                    compiled.function_table,
+                ).map_err(|e| VreError::NativeFunctionError(e))?;
+
+                child_vm.execute()?;
+
+                // Collect exports the child registered, cache them, push as struct
+                let exports = std::mem::take(&mut child_vm.pending_exports);
+                self.module_cache.insert(resolved_path, exports.clone());
+
+                let struct_id = self.heap.allocate(HeapObject::Struct(exports));
+                self.stack.push(Value::Reference(struct_id))
+            }
+
+            OpCode::ExportValue => {
+                // Operand: u16 constant-pool index of the export name string
+                let name_idx = self.read_u16()? as usize;
+                let export_name = match self.constants.get(name_idx)? {
+                    Value::String(s) => s,
+                    _ => return Err(VreError::TypeMismatch),
+                };
+                let val = self.stack.pop()?;
+                self.pending_exports.insert(export_name, val);
+                Ok(())
             }
 
             // ── Heap and Objects ───────────────────────────────────────────
@@ -1147,6 +1486,16 @@ impl VirtualMachine {
                                 if let Value::Reference(child) = val {
                                     worklist.push(*child);
                                 }
+                            }
+                        }
+                        HeapObject::Box(val) => {
+                            if let Value::Reference(child) = val {
+                                worklist.push(*child);
+                            }
+                        }
+                        HeapObject::Closure(_, upvalues) => {
+                            for upvalue_id in upvalues {
+                                worklist.push(*upvalue_id);
                             }
                         }
                         HeapObject::String(_) | HeapObject::Function(_) => {}

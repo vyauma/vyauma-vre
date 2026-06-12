@@ -9,7 +9,7 @@ use super::capability::Capability;
 use crate::error::{VreError, VreResult};
 
 /// Registry of granted capabilities
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CapabilityRegistry {
     granted: HashSet<&'static str>,
 }

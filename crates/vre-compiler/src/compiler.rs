@@ -9,6 +9,8 @@ pub struct CompiledProgram {
     pub instructions: Vec<u8>,
     pub constants: Vec<Value>,
     pub native_imports: Vec<String>,
+    /// Maps user-defined function names to their bytecode entry addresses
+    pub function_table: HashMap<String, u32>,
 }
 
 pub struct Compiler {
@@ -97,6 +99,7 @@ impl Compiler {
             instructions: self.instructions,
             constants: self.constants,
             native_imports,
+            function_table: self.functions.clone(),
         })
     }
 

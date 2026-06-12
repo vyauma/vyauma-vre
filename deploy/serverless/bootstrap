@@ -1,0 +1,9 @@
+#!/bin/sh
+# AWS Lambda custom runtime bootstrap for Vyauma Runtime Engine (VRE)
+set -euo pipefail
+
+# Initialization - execute VRE in AWS Lambda mode
+# Assumes `vre` binary is included in the package or Lambda Layer
+export VRE_LAMBDA_API="http://${AWS_LAMBDA_RUNTIME_API}/2018-06-01/runtime/invocation/"
+
+exec vre app.vym --lambda

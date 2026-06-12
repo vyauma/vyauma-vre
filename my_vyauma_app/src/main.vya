@@ -1,0 +1,22 @@
+// Vyauma Language - Main Entry Point
+// Idiomatic Static Typing and Concurrency
+
+fn main() {
+    print("Welcome to the Vyauma Language!");
+    
+    let sum: Int64 = calculate(10, 20);
+    print(sum);
+    
+    // Concurrency example using actor-like spawn/yield syntax
+    spawn(background_task);
+}
+
+fn calculate(a: Int64, b: Int64) -> Int64 {
+    return a + b;
+}
+
+fn background_task() {
+    print("Running in background...");
+    yield;
+    print("Finished background task.");
+}

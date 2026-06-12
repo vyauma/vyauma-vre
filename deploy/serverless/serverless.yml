@@ -1,0 +1,27 @@
+service: vre-serverless-app
+
+provider:
+  name: aws
+  runtime: provided.al2
+  architecture: arm64
+  memorySize: 256
+  timeout: 10
+  environment:
+    VRE_ENV: production
+
+package:
+  patterns:
+    - '!**/*'
+    - 'bootstrap'
+    - 'app.vym'
+
+functions:
+  api:
+    handler: handler
+    events:
+      - httpApi:
+          path: /
+          method: '*'
+      - httpApi:
+          path: /{proxy+}
+          method: '*'

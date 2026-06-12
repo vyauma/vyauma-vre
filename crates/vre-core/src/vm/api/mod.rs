@@ -10,11 +10,13 @@ pub type NativeFunction = fn(&mut Heap, Vec<Value>) -> Result<Value, String>;
 
 use crate::config::VreConfig;
 
+use crate::capability::capability::Capability;
+
 pub fn register_apis(config: &mut VreConfig) {
     // Register fs APIs
-    config.ffi_functions.insert("fs.readFile".to_string(), fs::read_file);
-    config.ffi_functions.insert("fs.writeFile".to_string(), fs::write_file);
+    config.register_ffi("fs.readFile", fs::read_file, vec![Capability::new("fs.read")]);
+    config.register_ffi("fs.writeFile", fs::write_file, vec![Capability::new("fs.write")]);
 
     // Register timer APIs
-    config.ffi_functions.insert("timers.setTimeout".to_string(), timers::set_timeout);
+    config.insert_ffi("timers.setTimeout".to_string(), timers::set_timeout);
 }

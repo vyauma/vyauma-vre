@@ -6,6 +6,14 @@
 use std::collections::HashMap;
 use crate::vm::vm::NativeFunction;
 
+use crate::capability::capability::Capability;
+
+#[derive(Clone)]
+pub struct FfiBinding {
+    pub func: NativeFunction,
+    pub caps: Vec<Capability>,
+}
+
 /// VM Configuration
 #[derive(Clone)]
 pub struct VreConfig {
@@ -19,7 +27,7 @@ pub struct VreConfig {
     pub max_call_depth: usize,
 
     /// Foreign Function Interface definitions
-    pub ffi_functions: HashMap<String, NativeFunction>,
+    pub ffi_functions: HashMap<String, FfiBinding>,
 }
 
 impl std::fmt::Debug for VreConfig {
@@ -48,5 +56,15 @@ impl VreConfig {
     /// Create a new configuration with default limits
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Register a native FFI function with capability constraints
+    pub fn register_ffi(&mut self, name: &str, func: NativeFunction, caps: Vec<Capability>) {
+        self.ffi_functions.insert(name.to_string(), FfiBinding { func, caps });
+    }
+
+    /// Register a native FFI function with no capability constraints (legacy wrapper)
+    pub fn insert_ffi(&mut self, name: String, func: NativeFunction) {
+        self.ffi_functions.insert(name, FfiBinding { func, caps: vec![] });
     }
 }

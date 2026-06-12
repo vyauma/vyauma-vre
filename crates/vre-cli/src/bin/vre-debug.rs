@@ -66,7 +66,8 @@ fn main() {
         bytecode.instructions, 
         bytecode.constants, 
         bytecode.native_imports, 
-        capabilities
+        capabilities,
+        std::collections::HashMap::new(), // vre-debug doesn't support function_table yet
     ).expect("Failed to initialize VM");
 
     println!("VRE Debugger v0.1");
@@ -358,8 +359,9 @@ fn disassemble(vm: &VirtualMachine, ip: usize) -> (String, usize) {
             next_ip += 4;
             format!("SPAWN      0x{:04X}", target)
         }
-        OpCode::Yield => "YIELD".to_string(),
-        OpCode::Await => "AWAIT".to_string(),
+        OpCode::Yield  => "YIELD".to_string(),
+        OpCode::Await  => "AWAIT".to_string(),
+        OpCode::SpawnDynamic => "SPAWN_DYNAMIC".to_string(),
 
         // ── Heap / Objects ─────────────────────────────────────────────
         OpCode::NewArray     => "NEW_ARRAY".to_string(),
@@ -389,9 +391,48 @@ fn disassemble(vm: &VirtualMachine, ip: usize) -> (String, usize) {
         OpCode::TryEnd => "TRY_END".to_string(),
         OpCode::Throw  => "THROW".to_string(),
 
+        // ── Closures ───────────────────────────────────────────────────
+        OpCode::NewClosure => {
+            let func_addr = read_u32(insts, next_ip);
+            let upcount   = read_u16(insts, next_ip + 4);
+            next_ip += 6;
+            format!("NEW_CLOSURE 0x{:04X} upvalues={}", func_addr, upcount)
+        }
+        OpCode::LoadUpvalue => {
+            let idx = read_u16(insts, next_ip);
+            next_ip += 2;
+            format!("LOAD_UPVALUE [{}]", idx)
+        }
+        OpCode::StoreUpvalue => {
+            let idx = read_u16(insts, next_ip);
+            next_ip += 2;
+            format!("STORE_UPVALUE [{}]", idx)
+        }
+        OpCode::BoxValue  => "BOX_VALUE".to_string(),
+        OpCode::LoadBox   => "LOAD_BOX".to_string(),
+        OpCode::StoreBox  => "STORE_BOX".to_string(),
+        OpCode::CallDynamic => {
+            let arg_count   = read_u16(insts, next_ip);
+            let local_count = read_u16(insts, next_ip + 2);
+            next_ip += 4;
+            format!("CALL_DYNAMIC args={} locals={}", arg_count, local_count)
+        }
+
         // ── System ─────────────────────────────────────────────────────
         OpCode::Nop  => "NOP".to_string(),
         OpCode::Halt => "HALT".to_string(),
+
+        // ── Module System ───────────────────────────────────────────────
+        OpCode::ImportModule => {
+            let const_idx = read_u16(insts, next_ip);
+            next_ip += 2;
+            format!("IMPORT_MODULE const[{}]", const_idx)
+        }
+        OpCode::ExportValue => {
+            let const_idx = read_u16(insts, next_ip);
+            next_ip += 2;
+            format!("EXPORT_VALUE const[{}]", const_idx)
+        }
     };
 
     (text, next_ip)

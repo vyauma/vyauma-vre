@@ -81,6 +81,14 @@ pub enum Instruction {
     LoadVar(String),
     StoreVar(String, Value),
     
+    NewClosure(String, Vec<Value>), // func_name, captured_vars
+    LoadUpvalue(usize),
+    StoreUpvalue(usize, Value),
+    BoxValue(Value),
+    LoadBox(Value),
+    StoreBox(Value, Value),
+    CallDynamic(Value, Vec<Value>),
+    
     Return(Option<Value>),
     Throw(Value),
     
@@ -92,6 +100,18 @@ pub enum Instruction {
     
     /// Cooperatively suspend the current task
     Yield,
+
+    /// Spawn a named function as a background task; pushes the task_id
+    SpawnTask(String, Vec<Value>),
+
+    /// Spawn a dynamic closure as a background task; pushes the task_id
+    SpawnDynamicTask(Value),
+
+    /// Load a module from the given path; pushes the module's export namespace struct.
+    ImportModule(String),
+
+    /// Register a named export binding for the current module (name, value register).
+    ExportValue(String, Value),
 }
 
 #[derive(Debug, Clone)]

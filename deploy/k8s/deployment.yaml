@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vre-app-deployment
+  labels:
+    app: vre-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: vre-app
+  template:
+    metadata:
+      labels:
+        app: vre-app
+    spec:
+      containers:
+      - name: vre-app
+        image: your-docker-registry/vre-app:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: VRE_ENV
+          value: "production"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "250m"

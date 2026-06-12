@@ -19,7 +19,7 @@ fn main() {
 
     let input_path = &args[1];
 
-    let (instructions, constants) = if input_path.ends_with(".vym") {
+    let (instructions, constants, native_imports, function_table) = if input_path.ends_with(".vym") {
         let source = match fs::read_to_string(input_path) {
             Ok(s) => s,
             Err(e) => {
@@ -30,7 +30,7 @@ fn main() {
         let path = std::path::Path::new(input_path);
         let base_path = path.parent().unwrap_or(std::path::Path::new("."));
         match vre_compiler::compile(&source, input_path, Some(base_path)) {
-            Ok(compiled) => (compiled.instructions, compiled.constants),
+            Ok(compiled) => (compiled.instructions, compiled.constants, compiled.native_imports, compiled.function_table),
             Err(e) => {
                 eprintln!("Compile Error: {}", e);
                 process::exit(1);
@@ -39,7 +39,7 @@ fn main() {
     } else {
         let bytes = fs::read(input_path).expect("Failed to read bytecode");
         let loaded = BytecodeLoader::load(&bytes).expect("Invalid bytecode");
-        (loaded.instructions, loaded.constants)
+        (loaded.instructions, loaded.constants, Vec::new(), std::collections::HashMap::new())
     };
 
     let mut capabilities = CapabilityRegistry::new();
@@ -55,8 +55,9 @@ fn main() {
         config,
         instructions,
         constants,
-        vec![],
+        native_imports,
         capabilities,
+        function_table,
     ).expect("Failed to initialize VM");
 
     println!("Vyauma Bytecode Debugger");

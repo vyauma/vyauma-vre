@@ -2,7 +2,7 @@ use vre_core::config::VreConfig;
 
 pub fn register_ffi(config: &mut VreConfig) {
     // Add ffi_sum
-    config.ffi_functions.insert("ffi_sum".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_sum".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_sum expects 2 arguments".to_string()); }
         let b = args.pop().unwrap();
         let a = args.pop().unwrap();
@@ -12,7 +12,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Array Len FFI
-    config.ffi_functions.insert("ffi_array_len".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_array_len".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_array_len expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Reference(id) => {
@@ -27,7 +27,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // JSON Parser FFI
-    config.ffi_functions.insert("ffi_json_parse".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_json_parse".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_json_parse expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -73,7 +73,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // JSON Stringify FFI
-    config.ffi_functions.insert("ffi_json_stringify".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_json_stringify".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_json_stringify expects 1 argument".to_string()); }
         let root = args.pop().unwrap();
 
@@ -120,7 +120,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // String Split FFI
-    config.ffi_functions.insert("ffi_string_split".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_string_split".to_string(), |heap, mut args| {
         if args.len() != 2 { return Err("ffi_string_split expects 2 arguments".to_string()); }
         let delimiter = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -142,7 +142,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // String Starts With FFI
-    config.ffi_functions.insert("ffi_string_starts_with".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_string_starts_with".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_string_starts_with expects 2 arguments".to_string()); }
         let prefix = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -156,7 +156,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Time FFI
-    config.ffi_functions.insert("ffi_time_now_ms".to_string(), |_heap, _args| {
+    config.insert_ffi("ffi_time_now_ms".to_string(), |_heap, _args| {
         let now = std::time::SystemTime::now();
         let since_the_epoch = now.duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| format!("Time went backwards: {}", e))?;
@@ -164,7 +164,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Math FFIs
-    config.ffi_functions.insert("ffi_math_abs".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_abs".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_math_abs expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => Ok(vre_core::vm::value::Value::Float64(n.abs())),
@@ -172,7 +172,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_math_floor".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_floor".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_math_floor expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => Ok(vre_core::vm::value::Value::Float64(n.floor())),
@@ -180,7 +180,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_math_ceil".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_ceil".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_math_ceil expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => Ok(vre_core::vm::value::Value::Float64(n.ceil())),
@@ -188,7 +188,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_math_round".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_round".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_math_round expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => Ok(vre_core::vm::value::Value::Float64(n.round())),
@@ -196,7 +196,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_math_sin".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_sin".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_math_sin expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => Ok(vre_core::vm::value::Value::Float64(n.sin())),
@@ -204,7 +204,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_math_cos".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_cos".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_math_cos expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => Ok(vre_core::vm::value::Value::Float64(n.cos())),
@@ -212,7 +212,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_math_tan".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_tan".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_math_tan expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => Ok(vre_core::vm::value::Value::Float64(n.tan())),
@@ -220,7 +220,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_math_sqrt".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_sqrt".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_math_sqrt expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => Ok(vre_core::vm::value::Value::Float64(n.sqrt())),
@@ -228,7 +228,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_math_pow".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_pow".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_math_pow expects 2 arguments".to_string()); }
         let y = match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => n,
@@ -242,7 +242,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Crypto FFIs
-    config.ffi_functions.insert("ffi_crypto_random_bytes".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_crypto_random_bytes".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_crypto_random_bytes expects 1 argument".to_string()); }
         let len = match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => n as usize,
@@ -258,7 +258,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Reference(ref_id))
     });
 
-    config.ffi_functions.insert("ffi_crypto_sha256".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_crypto_sha256".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_crypto_sha256 expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -269,16 +269,16 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // File I/O FFIs
-    config.ffi_functions.insert("ffi_fs_exists".to_string(), |_heap, mut args| {
+    config.register_ffi("ffi_fs_exists", |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_fs_exists expects 1 argument".to_string()); }
         let path = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
             _ => return Err("Expected path string".to_string()),
         };
         Ok(vre_core::vm::value::Value::Bool(vre_core::pal::get_pal().exists(std::path::Path::new(&path))))
-    });
+    }, vec![vre_core::capability::capability::Capability::new("fs.read")]);
 
-    config.ffi_functions.insert("ffi_fs_delete".to_string(), |_heap, mut args| {
+    config.register_ffi("ffi_fs_delete", |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_fs_delete expects 1 argument".to_string()); }
         let path = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -290,9 +290,9 @@ pub fn register_ffi(config: &mut VreConfig) {
             vre_core::pal::get_pal().remove_dir_all(std::path::Path::new(&path)).is_ok()
         };
         Ok(vre_core::vm::value::Value::Bool(result))
-    });
+    }, vec![vre_core::capability::capability::Capability::new("fs.write")]);
 
-    config.ffi_functions.insert("ffi_fs_size".to_string(), |_heap, mut args| {
+    config.register_ffi("ffi_fs_size", |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_fs_size expects 1 argument".to_string()); }
         let path = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -300,9 +300,9 @@ pub fn register_ffi(config: &mut VreConfig) {
         };
         let size = vre_core::pal::get_pal().metadata_len(std::path::Path::new(&path)).map(|len| len as f64).unwrap_or(-1.0);
         Ok(vre_core::vm::value::Value::Float64(size))
-    });
+    }, vec![vre_core::capability::capability::Capability::new("fs.read")]);
 
-    config.ffi_functions.insert("ffi_fs_read_file".to_string(), |_heap, mut args| {
+    config.register_ffi("ffi_fs_read_file", |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_fs_read_file expects 1 argument".to_string()); }
         let path = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -310,9 +310,9 @@ pub fn register_ffi(config: &mut VreConfig) {
         };
         let content = vre_core::pal::get_pal().read_to_string(std::path::Path::new(&path)).unwrap_or_else(|_| String::new());
         Ok(vre_core::vm::value::Value::String(content))
-    });
+    }, vec![vre_core::capability::capability::Capability::new("fs.read")]);
 
-    config.ffi_functions.insert("ffi_fs_write_file".to_string(), |_heap, mut args| {
+    config.register_ffi("ffi_fs_write_file", |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_fs_write_file expects 2 arguments".to_string()); }
         let content = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -324,9 +324,9 @@ pub fn register_ffi(config: &mut VreConfig) {
         };
         let success = vre_core::pal::get_pal().write(std::path::Path::new(&path), &content).is_ok();
         Ok(vre_core::vm::value::Value::Bool(success))
-    });
+    }, vec![vre_core::capability::capability::Capability::new("fs.write")]);
 
-    config.ffi_functions.insert("ffi_fs_append_file".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_fs_append_file".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_fs_append_file expects 2 arguments".to_string()); }
         let content = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -341,7 +341,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Bool(success))
     });
     // Console I/O FFIs
-    config.ffi_functions.insert("ffi_console_print".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_console_print".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_console_print expects 1 argument".to_string()); }
         let val = args.pop().unwrap();
         // Simple stringification for print
@@ -357,12 +357,14 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Null)
     });
 
-    config.ffi_functions.insert("ffi_console_println".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_console_println".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_console_println expects 1 argument".to_string()); }
         let val = args.pop().unwrap();
         let s = match val {
             vre_core::vm::value::Value::String(s) => s,
             vre_core::vm::value::Value::Float64(n) => n.to_string(),
+            vre_core::vm::value::Value::Int64(n) => n.to_string(),
+            vre_core::vm::value::Value::Int32(n) => n.to_string(),
             vre_core::vm::value::Value::Bool(b) => b.to_string(),
             vre_core::vm::value::Value::Null => "null".to_string(),
             vre_core::vm::value::Value::Reference(_) => "[Object Reference]".to_string(),
@@ -372,7 +374,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Null)
     });
 
-    config.ffi_functions.insert("ffi_console_readline".to_string(), |_heap, _args| {
+    config.insert_ffi("ffi_console_readline".to_string(), |_heap, _args| {
         let mut input = String::new();
         if std::io::stdin().read_line(&mut input).is_ok() {
             Ok(vre_core::vm::value::Value::String(input.trim_end_matches(&['\r', '\n'][..]).to_string()))
@@ -382,7 +384,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Additional String FFIs
-    config.ffi_functions.insert("ffi_string_len".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_string_len".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_string_len expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -391,7 +393,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Float64(s.len() as f64))
     });
 
-    config.ffi_functions.insert("ffi_string_contains".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_string_contains".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_string_contains expects 2 arguments".to_string()); }
         let sub = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -404,7 +406,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Bool(main_str.contains(&sub)))
     });
 
-    config.ffi_functions.insert("ffi_string_replace".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_string_replace".to_string(), |_heap, mut args| {
         if args.len() != 3 { return Err("ffi_string_replace expects 3 arguments".to_string()); }
         let new_str = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -421,7 +423,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::String(main_str.replace(&old_str, &new_str)))
     });
 
-    config.ffi_functions.insert("ffi_string_to_lower".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_string_to_lower".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_string_to_lower expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -430,7 +432,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::String(s.to_lowercase()))
     });
 
-    config.ffi_functions.insert("ffi_string_to_upper".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_string_to_upper".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_string_to_upper expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -439,7 +441,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::String(s.to_uppercase()))
     });
 
-    config.ffi_functions.insert("ffi_string_trim".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_string_trim".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_string_trim expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -449,7 +451,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Array FFIs
-    config.ffi_functions.insert("ffi_array_push".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_array_push".to_string(), |heap, mut args| {
         if args.len() != 2 { return Err("ffi_array_push expects 2 arguments".to_string()); }
         let val = args.pop().unwrap();
         let arr_ref = match args.pop().unwrap() {
@@ -466,7 +468,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_array_pop".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_array_pop".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_array_pop expects 1 argument".to_string()); }
         let arr_ref = match args.pop().unwrap() {
             vre_core::vm::value::Value::Reference(id) => id,
@@ -485,7 +487,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_array_get".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_array_get".to_string(), |heap, mut args| {
         if args.len() != 2 { return Err("ffi_array_get expects 2 arguments".to_string()); }
         let idx = match args.pop().unwrap() {
             val @ _ => val.as_f64().map_err(|_| "Expected number index".to_string())? as usize,
@@ -507,7 +509,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_array_set".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_array_set".to_string(), |heap, mut args| {
         if args.len() != 3 { return Err("ffi_array_set expects 3 arguments".to_string()); }
         let val = args.pop().unwrap();
         let idx = match args.pop().unwrap() {
@@ -532,11 +534,11 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // OS / Environment FFIs
-    config.ffi_functions.insert("ffi_os_name".to_string(), |_heap, _args| {
+    config.insert_ffi("ffi_os_name".to_string(), |_heap, _args| {
         Ok(vre_core::vm::value::Value::String(std::env::consts::OS.to_string()))
     });
 
-    config.ffi_functions.insert("ffi_env_get".to_string(), |_heap, mut args| {
+    config.register_ffi("ffi_env_get", |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_env_get expects 1 argument".to_string()); }
         let key = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -547,10 +549,10 @@ pub fn register_ffi(config: &mut VreConfig) {
         } else {
             Ok(vre_core::vm::value::Value::Null)
         }
-    });
+    }, vec![vre_core::capability::capability::Capability::new("sys.env")]);
 
     // Additional Math FFIs
-    config.ffi_functions.insert("ffi_math_log".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_math_log".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_math_log expects 1 argument".to_string()); }
         match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => Ok(vre_core::vm::value::Value::Float64(n.ln())),
@@ -558,12 +560,12 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_math_pi".to_string(), |_heap, _args| {
+    config.insert_ffi("ffi_math_pi".to_string(), |_heap, _args| {
         Ok(vre_core::vm::value::Value::Float64(std::f64::consts::PI))
     });
 
     // Additional String FFIs
-    config.ffi_functions.insert("ffi_string_ends_with".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_string_ends_with".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_string_ends_with expects 2 arguments".to_string()); }
         let suffix = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -576,7 +578,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Bool(s.ends_with(&suffix)))
     });
 
-    config.ffi_functions.insert("ffi_string_index_of".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_string_index_of".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_string_index_of expects 2 arguments".to_string()); }
         let sub = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -594,7 +596,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Path FFIs
-    config.ffi_functions.insert("ffi_path_join".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_path_join".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_path_join expects 2 arguments".to_string()); }
         let p2 = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -609,7 +611,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::String(path.to_string_lossy().to_string()))
     });
 
-    config.ffi_functions.insert("ffi_path_basename".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_path_basename".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_path_basename expects 1 argument".to_string()); }
         let p1 = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -624,7 +626,7 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Dictionary (Struct) FFIs
-    config.ffi_functions.insert("ffi_dict_keys".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_dict_keys".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_dict_keys expects 1 argument".to_string()); }
         let dict_ref = match args.pop().unwrap() {
             vre_core::vm::value::Value::Reference(id) => id,
@@ -645,7 +647,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_dict_has".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_dict_has".to_string(), |heap, mut args| {
         if args.len() != 2 { return Err("ffi_dict_has expects 2 arguments".to_string()); }
         let key = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -665,19 +667,19 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Process FFI
-    config.ffi_functions.insert("ffi_process_exit".to_string(), |_heap, mut args| {
+    config.register_ffi("ffi_process_exit", |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_process_exit expects 1 argument".to_string()); }
         let code = match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => n as i32,
             _ => return Err("Expected exit code number".to_string()),
         };
         std::process::exit(code);
-    });
+    }, vec![vre_core::capability::capability::Capability::new("sys.process")]);
 
     // --- Phase 4 Utilities ---
 
     // Regex FFIs
-    config.ffi_functions.insert("ffi_regex_is_match".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_regex_is_match".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_regex_is_match expects 2 arguments".to_string()); }
         let text = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -691,7 +693,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Bool(re.is_match(&text)))
     });
 
-    config.ffi_functions.insert("ffi_regex_replace".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_regex_replace".to_string(), |_heap, mut args| {
         if args.len() != 3 { return Err("ffi_regex_replace expects 3 arguments".to_string()); }
         let rep = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -710,11 +712,11 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // Date / Time FFIs
-    config.ffi_functions.insert("ffi_date_now_iso8601".to_string(), |_heap, _args| {
+    config.insert_ffi("ffi_date_now_iso8601".to_string(), |_heap, _args| {
         Ok(vre_core::vm::value::Value::String(chrono::Utc::now().to_rfc3339()))
     });
 
-    config.ffi_functions.insert("ffi_date_format".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_date_format".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_date_format expects 2 arguments".to_string()); }
         let format_str = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -730,14 +732,14 @@ pub fn register_ffi(config: &mut VreConfig) {
     });
 
     // UUID
-    config.ffi_functions.insert("ffi_uuid_v4".to_string(), |_heap, _args| {
+    config.insert_ffi("ffi_uuid_v4".to_string(), |_heap, _args| {
         Ok(vre_core::vm::value::Value::String(uuid::Uuid::new_v4().to_string()))
     });
 
     // --- Phase 4 Serialization (YAML, TOML) ---
 
     // YAML Parser
-    config.ffi_functions.insert("ffi_yaml_parse".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_yaml_parse".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_yaml_parse expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -769,7 +771,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         json_to_vyauma(heap, &json_val)
     });
 
-    config.ffi_functions.insert("ffi_yaml_stringify".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_yaml_stringify".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_yaml_stringify expects 1 argument".to_string()); }
         let root = args.pop().unwrap();
         
@@ -806,7 +808,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::String(s))
     });
 
-    config.ffi_functions.insert("ffi_toml_parse".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_toml_parse".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_toml_parse expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -838,7 +840,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         json_to_vyauma(heap, &json_val)
     });
 
-    config.ffi_functions.insert("ffi_toml_stringify".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_toml_stringify".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_toml_stringify expects 1 argument".to_string()); }
         let root = args.pop().unwrap();
         
@@ -877,7 +879,7 @@ pub fn register_ffi(config: &mut VreConfig) {
 
     // --- Phase 4 File APIs (Directory) ---
 
-    config.ffi_functions.insert("ffi_fs_create_dir".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_fs_create_dir".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_fs_create_dir expects 1 argument".to_string()); }
         let path = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -887,7 +889,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Bool(success))
     });
 
-    config.ffi_functions.insert("ffi_fs_is_dir".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_fs_is_dir".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_fs_is_dir expects 1 argument".to_string()); }
         let path = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -896,7 +898,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Bool(vre_core::pal::get_pal().is_dir(std::path::Path::new(&path))))
     });
 
-    config.ffi_functions.insert("ffi_fs_read_dir".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_fs_read_dir".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_fs_read_dir expects 1 argument".to_string()); }
         let path = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -917,7 +919,7 @@ pub fn register_ffi(config: &mut VreConfig) {
 
     // --- Phase 4 Networking (HTTP) ---
 
-    config.ffi_functions.insert("ffi_http_get".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_http_get".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_http_get expects 1 argument".to_string()); }
         let url = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -938,7 +940,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_http_post".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_http_post".to_string(), |heap, mut args| {
         if args.len() != 2 { return Err("ffi_http_post expects 2 arguments (url, body_str)".to_string()); }
         let body = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -965,7 +967,7 @@ pub fn register_ffi(config: &mut VreConfig) {
 
     // --- Phase 4 Networking (WebSocket) ---
 
-    config.ffi_functions.insert("ffi_ws_connect".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_ws_connect".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_ws_connect expects 1 argument".to_string()); }
         let url = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -977,7 +979,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_ws_send".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_ws_send".to_string(), |_heap, mut args| {
         if args.len() != 2 { return Err("ffi_ws_send expects 2 arguments".to_string()); }
         let msg = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -994,7 +996,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_ws_recv".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_ws_recv".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_ws_recv expects 1 argument".to_string()); }
         let handle = match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => n as usize,
@@ -1009,7 +1011,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_ws_close".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_ws_close".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_ws_close expects 1 argument".to_string()); }
         let handle = match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => n as usize,
@@ -1024,7 +1026,7 @@ pub fn register_ffi(config: &mut VreConfig) {
 
     // --- Phase 4 Process / Timers ---
 
-    config.ffi_functions.insert("ffi_sleep".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_sleep".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_sleep expects 1 argument".to_string()); }
         let ms = match args.pop().unwrap() {
             vre_core::vm::value::Value::Float64(n) => n as u64,
@@ -1034,7 +1036,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::Null)
     });
 
-    config.ffi_functions.insert("ffi_array_remove".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_array_remove".to_string(), |heap, mut args| {
         if args.len() != 2 { return Err("ffi_array_remove expects 2 arguments".to_string()); }
         let idx = match args.pop().unwrap() {
             num @ _ => num.as_f64().map_err(|_| "Expected number index".to_string())? as usize,
@@ -1107,7 +1109,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     }
 
-    config.ffi_functions.insert("ffi_toml_parse".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_toml_parse".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_toml_parse expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -1117,7 +1119,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         build_vyauma(heap, &toml_val)
     });
 
-    config.ffi_functions.insert("ffi_toml_stringify".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_toml_stringify".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_toml_stringify expects 1 argument".to_string()); }
         let val = args.pop().unwrap();
         let j = dump_vyauma(heap, &val)?;
@@ -1125,7 +1127,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::String(s))
     });
 
-    config.ffi_functions.insert("ffi_xml_parse".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_xml_parse".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_xml_parse expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -1137,7 +1139,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         build_vyauma(heap, &xml_val)
     });
 
-    config.ffi_functions.insert("ffi_xml_stringify".to_string(), |heap, mut args| {
+    config.insert_ffi("ffi_xml_stringify".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_xml_stringify expects 1 argument".to_string()); }
         let val = args.pop().unwrap();
         let j = dump_vyauma(heap, &val)?;
@@ -1147,7 +1149,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     });
 
-    config.ffi_functions.insert("ffi_base64_encode".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_base64_encode".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_base64_encode expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -1158,7 +1160,7 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::String(b64))
     });
 
-    config.ffi_functions.insert("ffi_base64_decode".to_string(), |_heap, mut args| {
+    config.insert_ffi("ffi_base64_decode".to_string(), |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_base64_decode expects 1 argument".to_string()); }
         let s = match args.pop().unwrap() {
             vre_core::vm::value::Value::String(s) => s,
@@ -1168,5 +1170,254 @@ pub fn register_ffi(config: &mut VreConfig) {
         let bytes = STANDARD.decode(s).map_err(|e| e.to_string())?;
         let decoded = String::from_utf8(bytes).map_err(|e| e.to_string())?;
         Ok(vre_core::vm::value::Value::String(decoded))
+    });
+
+    config.insert_ffi("ffi_http_get".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_http_get expects 1 argument (url)".to_string()); }
+        let url = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string URL".to_string()),
+        };
+        
+        match ureq::get(&url).call() {
+            Ok(res) => {
+                let body = res.into_string().unwrap_or_default();
+                Ok(vre_core::vm::value::Value::String(body))
+            }
+            Err(e) => Err(format!("HTTP GET failed: {}", e)),
+        }
+    });
+
+    config.insert_ffi("ffi_http_post".to_string(), |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_http_post expects 2 arguments (url, body)".to_string()); }
+        let body = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string body".to_string()),
+        };
+        let url = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string URL".to_string()),
+        };
+        
+        match ureq::post(&url).set("Content-Type", "application/json").send_string(&body) {
+            Ok(res) => {
+                let resp_body = res.into_string().unwrap_or_default();
+                Ok(vre_core::vm::value::Value::String(resp_body))
+            }
+            Err(e) => Err(format!("HTTP POST failed: {}", e)),
+        }
+    });
+
+    // --- Phase 25: Testing Assertions ---
+    config.insert_ffi("ffi_assert".to_string(), |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_assert expects 2 arguments (condition, message)".to_string()); }
+        let msg = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string message".to_string()),
+        };
+        let cond = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Bool(b) => b,
+            _ => return Err("Expected bool condition".to_string()),
+        };
+        if cond {
+            Ok(vre_core::vm::value::Value::Null)
+        } else {
+            Err(format!("Assertion failed: {}", msg))
+        }
+    });
+
+    config.insert_ffi("ffi_assert_eq".to_string(), |heap, mut args| {
+        if args.len() != 3 { return Err("ffi_assert_eq expects 3 arguments (actual, expected, message)".to_string()); }
+        let msg = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string message".to_string()),
+        };
+        let expected = args.pop().unwrap();
+        let actual = args.pop().unwrap();
+        
+        let are_equal = match (&actual, &expected) {
+            (vre_core::vm::value::Value::Null, vre_core::vm::value::Value::Null) => true,
+            (vre_core::vm::value::Value::Bool(a), vre_core::vm::value::Value::Bool(b)) => a == b,
+            (vre_core::vm::value::Value::Float64(a), vre_core::vm::value::Value::Float64(b)) => (a - b).abs() < f64::EPSILON,
+            (vre_core::vm::value::Value::String(a), vre_core::vm::value::Value::String(b)) => a == b,
+            // For references we could do a deep compare but for now we'll do reference equality
+            (vre_core::vm::value::Value::Reference(a), vre_core::vm::value::Value::Reference(b)) => {
+                if a == b {
+                    true
+                } else {
+                    // Try to deep compare strings inside heap
+                    let obj_a = heap.get(*a);
+                    let obj_b = heap.get(*b);
+                    if let (Ok(vre_core::vm::memory::HeapObject::String(s_a)), Ok(vre_core::vm::memory::HeapObject::String(s_b))) = (obj_a, obj_b) {
+                        s_a == s_b
+                    } else {
+                        false
+                    }
+                }
+            },
+            _ => false,
+        };
+
+        if are_equal {
+            Ok(vre_core::vm::value::Value::Null)
+        } else {
+            Err(format!("Assertion failed: {} (Expected {:?}, got {:?})", msg, expected, actual))
+        }
+    });
+
+    // --- Phase 26: Standard Library Expansions ---
+
+    // ffi_crypto_sha256
+    config.insert_ffi("ffi_crypto_sha256".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_crypto_sha256 expects 1 argument".to_string()); }
+        let data = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string argument".to_string()),
+        };
+        let hash = vre_core::crypto::sha256(data.as_bytes());
+        Ok(vre_core::vm::value::Value::String(hash))
+    });
+
+    // ffi_crypto_random_bytes (returns Base64 encoded string)
+    config.insert_ffi("ffi_crypto_random_bytes".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_crypto_random_bytes expects 1 argument (length)".to_string()); }
+        let len = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Float64(n) => {
+                if n < 0.0 || n > 1024.0 * 1024.0 {
+                    return Err("Invalid random bytes length".to_string());
+                }
+                n as usize
+            },
+            _ => return Err("Expected numeric length".to_string()),
+        };
+        let bytes = vre_core::crypto::random_bytes(len);
+        let b64 = base64::encode(bytes);
+        Ok(vre_core::vm::value::Value::String(b64))
+    });
+
+    // ffi_regex_is_match
+    config.insert_ffi("ffi_regex_is_match".to_string(), |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_regex_is_match expects 2 arguments (pattern, text)".to_string()); }
+        let text = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string text".to_string()),
+        };
+        let pattern = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string pattern".to_string()),
+        };
+        let re = regex::Regex::new(&pattern).map_err(|e| format!("Invalid regex: {}", e))?;
+        Ok(vre_core::vm::value::Value::Bool(re.is_match(&text)))
+    });
+
+    // ffi_regex_replace
+    config.insert_ffi("ffi_regex_replace".to_string(), |_heap, mut args| {
+        if args.len() != 3 { return Err("ffi_regex_replace expects 3 arguments (pattern, text, replacement)".to_string()); }
+        let replacement = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string replacement".to_string()),
+        };
+        let text = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string text".to_string()),
+        };
+        let pattern = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string pattern".to_string()),
+        };
+        let re = regex::Regex::new(&pattern).map_err(|e| format!("Invalid regex: {}", e))?;
+        let result = re.replace_all(&text, replacement.as_str()).to_string();
+        Ok(vre_core::vm::value::Value::String(result))
+    });
+
+    // --- Phase 27: Native Document Database API ---
+
+    config.register_ffi("ffi_db_insert", |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_db_insert expects 2 arguments (collection, document_json)".to_string()); }
+        let doc_json = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected JSON string for document".to_string()),
+        };
+        let col = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string for collection".to_string()),
+        };
+        
+        let doc_val: serde_json::Value = serde_json::from_str(&doc_json).map_err(|e| format!("Invalid JSON: {}", e))?;
+        let db = vre_core::db::DocumentDatabase::new("vre_data");
+        match db.insert(&col, doc_val) {
+            Ok(id) => Ok(vre_core::vm::value::Value::String(id)),
+            Err(e) => Err(format!("DB Insert error: {}", e)),
+        }
+    }, vec![vre_core::capability::capability::Capability::new("db.write")]);
+
+    config.register_ffi("ffi_db_find", |_heap, mut args| {
+        if args.len() != 3 { return Err("ffi_db_find expects 3 arguments (collection, filter_key, filter_value)".to_string()); }
+        let filter_val = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string for filter value".to_string()),
+        };
+        let filter_key = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string for filter key".to_string()),
+        };
+        let col = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string for collection".to_string()),
+        };
+
+        let db = vre_core::db::DocumentDatabase::new("vre_data");
+        let results = db.find(&col, &filter_key, &filter_val);
+        let res_json = serde_json::to_string(&results).map_err(|e| format!("JSON Serialization error: {}", e))?;
+        Ok(vre_core::vm::value::Value::String(res_json))
+    }, vec![vre_core::capability::capability::Capability::new("db.read")]);
+
+    config.register_ffi("ffi_db_delete", |_heap, mut args| {
+        if args.len() != 3 { return Err("ffi_db_delete expects 3 arguments (collection, filter_key, filter_value)".to_string()); }
+        let filter_val = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string for filter value".to_string()),
+        };
+        let filter_key = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string for filter key".to_string()),
+        };
+        let col = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string for collection".to_string()),
+        };
+
+        let db = vre_core::db::DocumentDatabase::new("vre_data");
+        match db.delete(&col, &filter_key, &filter_val) {
+            Ok(b) => Ok(vre_core::vm::value::Value::Bool(b)),
+            Err(e) => Err(format!("DB Delete error: {}", e)),
+        }
+    }, vec![vre_core::capability::capability::Capability::new("db.write")]);
+
+    // --- Phase 28: Task Concurrency APIs ---
+    
+    // NOTE: ffi_task_sleep is intercepted by the VM in OpCode::CallNative!
+    // This closure will NEVER actually be called. We register it merely to satisfy the configuration 
+    // registry so the bytecode loader maps the name correctly.
+    config.insert_ffi("ffi_task_sleep".to_string(), |_heap, _args| {
+        Ok(vre_core::vm::value::Value::Null)
+    });
+
+    // --- Phase 31: Dynamic Task Spawning ---
+
+    // NOTE: ffi_task_spawn is intercepted by the VM before the closure is invoked.
+    // Registered here so it resolves in the native import table.
+    config.insert_ffi("ffi_task_spawn".to_string(), |_heap, _args| {
+        Ok(vre_core::vm::value::Value::Null)
+    });
+
+    // NOTE: ffi_task_await is intercepted by the VM before invocation
+    config.insert_ffi("ffi_task_await".to_string(), |_heap, _args| {
+        Ok(vre_core::vm::value::Value::Null)
+    });
+
+    // NOTE: ffi_set_timeout is intercepted by the VM before invocation
+    config.insert_ffi("ffi_set_timeout".to_string(), |_heap, _args| {
+        Ok(vre_core::vm::value::Value::Null)
     });
 }
