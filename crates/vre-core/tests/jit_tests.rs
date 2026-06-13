@@ -12,6 +12,7 @@ fn run_jit_vm(constants: Vec<Value>, instructions: Vec<u8>) -> VreResult<Option<
         constants,
         vec![],
         CapabilityRegistry::new(),
+        std::collections::HashMap::new(),
     )
     .unwrap();
     vm.execute()?;

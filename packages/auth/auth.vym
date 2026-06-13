@@ -1,0 +1,39 @@
+export class Auth:
+    secret_key: String
+
+    fn hash_password(password: String) -> String:
+        return ffi_crypto_bcrypt(password)
+
+    fn verify_password(password: String, hash: String) -> Bool:
+        return ffi_crypto_bcrypt_verify(password, hash)
+
+    fn generate_jwt(payload_json: String, expiry_seconds: Float64) -> String:
+        let header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}"
+        let b64_header = ffi_crypto_base64url_encode(header)
+        let b64_payload = ffi_crypto_base64url_encode(payload_json)
+        
+        let signing_input = b64_header + "." + b64_payload
+        let signature = ffi_crypto_hmac_sha256_base64url(self.secret_key, signing_input)
+        
+        return signing_input + "." + signature
+
+    fn verify_jwt(token: String) -> String:
+        let parts = ffi_string_split(token, ".")
+        if ffi_array_len(parts) != 3:
+            return ""
+        
+        let b64_header: String = parts[0]
+        let b64_payload: String = parts[1]
+        let signature: String = parts[2]
+        
+        let signing_input = b64_header + "." + b64_payload
+        let expected_signature = ffi_crypto_hmac_sha256_base64url(self.secret_key, signing_input)
+        
+        if signature != expected_signature:
+            return ""
+        
+        let payload_json = ffi_crypto_base64url_decode(b64_payload)
+        return payload_json
+
+export fn new_auth(secret: String) -> Auth:
+    return new Auth(secret)

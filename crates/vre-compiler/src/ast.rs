@@ -7,12 +7,29 @@ pub enum Expr {
     BinaryOp(Box<Expr>, BinaryOperator, Box<Expr>, Option<Type>),
     Call(String, Vec<Expr>, Option<Type>),
     ArrayLiteral(Vec<Expr>),
-    IndexAccess(Box<Expr>, Box<Expr>),
+    IndexAccess(Box<Expr>, Box<Expr>, Option<Type>),
     StructInit(String, Vec<(String, Expr)>),
     PropertyAccess(Box<Expr>, String, Option<Type>),
     DictLiteral(Vec<(Expr, Expr)>),
     NewClass(String, Vec<Expr>),
     MethodCall(Box<Expr>, String, Vec<Expr>, Option<Type>),
+    CallDynamic(Box<Expr>, Vec<Expr>, Option<Type>),
+    
+    // v2 Additions
+    NamedCall(String, Vec<Argument>, Option<Type>),
+    NamedMethodCall(Box<Expr>, String, Vec<Argument>, Option<Type>),
+    NamedNewClass(String, Vec<Argument>),
+    Closure {
+        params: Vec<(String, Option<Type>)>,
+        return_type: Option<Type>,
+        body: Block,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Argument {
+    pub name: Option<String>,
+    pub value: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,11 +61,13 @@ pub enum Type {
     Array(Box<Type>),
     Dict(Box<Type>, Box<Type>),
     Class(String),
+    Function(Vec<Type>, Box<Type>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Let(String, Option<Type>, Expr),
+    LetMut(String, Option<Type>, Expr),
     Assign(String, Expr),
     AssignIndex(String, Expr, Expr),
     Expr(Expr),

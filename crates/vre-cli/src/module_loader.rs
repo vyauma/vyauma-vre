@@ -46,7 +46,7 @@ impl ModuleLoader for CompilerModuleLoader {
 /// Resolution order:
 /// 1. `std/<name>` → `$VRE_STD_PATH/<name>.vya` (or `.vym`)
 /// 2. `./` or `../` relative path → resolved against `base_dir`
-/// 3. Bare name → `vyauma_modules/<name>/index.vym` or `.vya`
+/// 3. Bare name → `vym_modules/<name>/index.vym` or `.vya`
 fn resolve_module_path(path: &str, base_dir: &Path) -> Result<PathBuf, String> {
     if path.starts_with("std/") {
         let std_root = std::env::var("VRE_STD_PATH")
@@ -62,13 +62,13 @@ fn resolve_module_path(path: &str, base_dir: &Path) -> Result<PathBuf, String> {
         return Ok(p);
     }
 
-    // Package name — look in vyauma_modules/
+    // Package name — look in vym_modules/
     let modules_root = std::env::var("VRE_MODULES_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             std::env::current_dir()
                 .unwrap_or_else(|_| PathBuf::from("."))
-                .join("vyauma_modules")
+                .join("vym_modules")
         });
 
     // Try index.vym then index.vya then index.js etc.
@@ -82,7 +82,7 @@ fn resolve_module_path(path: &str, base_dir: &Path) -> Result<PathBuf, String> {
     }
 
     Err(format!(
-        "Cannot resolve module '{}' — not found in ./vyauma_modules/{}",
+        "Cannot resolve module '{}' — not found in ./vym_modules/{}",
         path, path
     ))
 }

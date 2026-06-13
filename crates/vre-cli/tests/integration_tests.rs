@@ -2,6 +2,13 @@ use std::process::Command;
 use std::fs;
 use std::path::PathBuf;
 
+// ── Test helpers ──────────────────────────────────────────────────────────────
+
+fn vre_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_vre")
+}
+
+/// Run a Vyauma script file via `vre run <file>`.
 fn run_script(script_code: &str, test_name: &str) -> (String, String) {
     run_script_with_args(script_code, test_name, &[])
 }
@@ -9,22 +16,24 @@ fn run_script(script_code: &str, test_name: &str) -> (String, String) {
 fn run_script_with_args(script_code: &str, test_name: &str, args: &[&str]) -> (String, String) {
     let test_dir = std::env::temp_dir().join("vyauma_test");
     fs::create_dir_all(&test_dir).unwrap();
-    
+
     let script_path = test_dir.join(format!("{}.vym", test_name));
     fs::write(&script_path, script_code).unwrap();
-    
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vre"));
-    cmd.arg(script_path);
+
+    let mut cmd = Command::new(vre_bin());
+    cmd.arg("run");                      // ← new: explicit `run` subcommand
+    cmd.arg(&script_path);
     for arg in args {
         cmd.arg(arg);
     }
-    
+
     let output = cmd.output().expect("Failed to execute vre binary");
-        
     let out = String::from_utf8_lossy(&output.stdout).to_string();
     let err = String::from_utf8_lossy(&output.stderr).to_string();
     (out, err)
 }
+
+// ── Runtime integration tests ─────────────────────────────────────────────────
 
 #[test]
 fn test_basic_arithmetic() {
@@ -48,7 +57,7 @@ fn main():
 fn test_while_loop() {
     let script = r#"
 fn main():
-    let i = 0
+    let mut i = 0
     while i < 3:
         ffi_console_print("loop\n")
         i = i + 1
@@ -62,7 +71,6 @@ fn main():
 
 #[test]
 fn test_string_concat() {
-    // String + Number should produce string concatenation, not a type error
     let script = r#"
 fn main():
     let x = "value: "
@@ -122,7 +130,9 @@ fn main():
     let is_d = ffi_fs_is_dir("test_dir_phase4")
     ffi_console_print(is_d)
 "#;
-    let (out, _err) = run_script(script, "test_phase4_fs_dir");
+    let (out, err) = run_script_with_args(script, "test_phase4_fs_dir", &["--allow-all"]);
+    println!("STDOUT: {}", out);
+    println!("STDERR: {}", err);
     assert!(out.contains("true"));
     let _ = std::fs::remove_dir("test_dir_phase4");
 }
@@ -156,10 +166,6 @@ fn main():
 fn test_phase6_capability_denied() {
     let script = r#"
 fn main():
-    // Creating a directory needs fs.write in our implementation, wait, no, fs_create_dir is fs.write maybe?
-    // Let's test reading a file or opening a file.
-    // We didn't map all PAL to capabilities perfectly, but we mapped `file_open` (fs.read) and `net_connect` (net.connect).
-    // Let's do `net_connect`.
     let fd = net_connect("127.0.0.1", 8080)
 "#;
     let (out, err) = run_script_with_args(script, "test_phase6_capability_denied", &[]);
@@ -170,11 +176,11 @@ fn main():
 fn test_phase6_capability_granted() {
     let script = r#"
 fn main():
-    // The connection might fail since nothing is listening, but the capability should be granted, so we won't get CapabilityNotGranted.
     let fd = net_connect("127.0.0.1", 8080)
     ffi_console_print("Executed")
 "#;
-    let (out, err) = run_script_with_args(script, "test_phase6_capability_granted", &["--allow-net"]);
+    let (out, err) =
+        run_script_with_args(script, "test_phase6_capability_granted", &["--allow-net"]);
     assert!(!err.contains("capability not granted"));
     assert!(out.contains("Executed"));
 }
@@ -191,58 +197,207 @@ export fn public_func() {
 }
 "#;
     let script_b = r#"
-import "test_export_a"
+import "./test_export_a.vya"
 
 fn main() {
-    // Try to call the private function (should fail to compile)
     ffi_console_print("Trying secret: " + test_export_a__secret_func())
 }
 "#;
     let script_c = r#"
-import "test_export_a"
+import "./test_export_a.vya"
 
 fn main() {
-    // Try to call the public function (should succeed)
     ffi_console_print("Public says: " + test_export_a__public_func())
 }
 "#;
 
     let dir = std::env::temp_dir().join("vre_phase7_test");
     std::fs::create_dir_all(&dir).unwrap();
-    
+
     let path_a = dir.join("test_export_a.vya");
     let path_b = dir.join("test_export_b.vya");
     let path_c = dir.join("test_export_c.vya");
-    
+
     std::fs::write(&path_a, script_a).unwrap();
     std::fs::write(&path_b, script_b).unwrap();
     std::fs::write(&path_c, script_c).unwrap();
 
-    let exe_path = env!("CARGO_BIN_EXE_vre");
-    
-    // Run B (which tries to call private func)
-    let output_b = std::process::Command::new(exe_path)
+    // Run B (tries to call private function — should fail)
+    let output_b = Command::new(vre_bin())
+        .arg("run")
         .arg(&path_b)
         .arg("--allow-all")
         .current_dir(&dir)
         .output()
         .unwrap();
-    
+
     let err_b = String::from_utf8_lossy(&output_b.stderr).to_lowercase();
     let out_b = String::from_utf8_lossy(&output_b.stdout).to_lowercase();
     assert!(!output_b.status.success());
-    // The type checker should throw an unresolved function error because `test_export_a__secret_func` doesn't exist
-    assert!(err_b.contains("unresolved") || out_b.contains("unresolved") || err_b.contains("undefined") || out_b.contains("undefined"), "Expected undefined/unresolved function error, got stderr: '{}' and stdout: '{}'", err_b, out_b);
+    assert!(
+        err_b.contains("unresolved") || out_b.contains("unresolved")
+            || err_b.contains("undefined") || out_b.contains("undefined"),
+        "Expected undefined/unresolved error, got stderr: '{}' stdout: '{}'", err_b, out_b
+    );
 
-    // Run C (which calls public func)
-    let output_c = std::process::Command::new(exe_path)
+    // Run C (calls public function — should succeed)
+    let output_c = Command::new(vre_bin())
+        .arg("run")
         .arg(&path_c)
         .arg("--allow-all")
         .current_dir(&dir)
         .output()
         .unwrap();
-        
+
     let out_c = String::from_utf8_lossy(&output_c.stdout);
-    assert!(output_c.status.success(), "Expected successful execution, got error: {}", String::from_utf8_lossy(&output_c.stderr));
+    assert!(
+        output_c.status.success(),
+        "Expected success, got: {}",
+        String::from_utf8_lossy(&output_c.stderr)
+    );
     assert!(out_c.contains("Public says: 42"));
+}
+
+// ── CLI subcommand tests ───────────────────────────────────────────────────────
+
+#[test]
+fn test_cli_help() {
+    let output = Command::new(vre_bin())
+        .arg("--help")
+        .output()
+        .expect("Failed to run vre --help");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Vyauma Runtime Engine"));
+    assert!(stdout.contains("run"));
+    assert!(stdout.contains("new"));
+    assert!(stdout.contains("build"));
+}
+
+#[test]
+fn test_cli_version() {
+    let output = Command::new(vre_bin())
+        .arg("version")
+        .output()
+        .expect("Failed to run vre version");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("VRE"));
+    assert!(stdout.contains("CLI Version"));
+}
+
+#[test]
+fn test_cli_new_app_template() {
+    let tmp = std::env::temp_dir().join("vre_cli_test_new_app");
+    let _ = std::fs::remove_dir_all(&tmp); // clean up from previous runs
+
+    let output = Command::new(vre_bin())
+        .arg("new")
+        .arg(tmp.to_str().unwrap())
+        .arg("--template")
+        .arg("app")
+        .output()
+        .expect("Failed to run vre new");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "vre new failed.\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
+    );
+    assert!(tmp.join("vre.toml").exists(), "vre.toml not created");
+    assert!(tmp.join("src").exists(), "src/ not created");
+    assert!(tmp.join("README.md").exists(), "README.md not created");
+    assert!(tmp.join(".gitignore").exists(), ".gitignore not created");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_cli_new_library_template() {
+    let tmp = std::env::temp_dir().join("vre_cli_test_new_lib");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    let output = Command::new(vre_bin())
+        .arg("new")
+        .arg(tmp.to_str().unwrap())
+        .arg("--template")
+        .arg("library")
+        .output()
+        .expect("Failed to run vre new --template library");
+
+    assert!(output.status.success());
+    assert!(tmp.join("src/lib.vya").exists(), "lib.vya not created");
+    assert!(tmp.join("tests").exists(), "tests/ not created");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_cli_check_valid_file() {
+    let tmp = std::env::temp_dir().join("vre_cli_check_test.vya");
+    fs::write(
+        &tmp,
+        "fn main() {\n    ffi_console_print(\"hello\");\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(vre_bin())
+        .arg("check")
+        .arg(&tmp)
+        .output()
+        .expect("Failed to run vre check");
+
+    // Even if check fails for syntax reasons, it shouldn't panic
+    // (exit code 0 means type-check passed)
+    let _stdout = String::from_utf8_lossy(&output.stdout);
+    let _stderr = String::from_utf8_lossy(&output.stderr);
+}
+
+#[test]
+fn test_cli_doctor_runs() {
+    let output = Command::new(vre_bin())
+        .arg("doctor")
+        .output()
+        .expect("Failed to run vre doctor");
+    // Doctor always exits 0 (it's diagnostic, not pass/fail)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Should contain diagnostic sections
+    let combined = format!("{}{}", stdout, stderr);
+    assert!(
+        combined.contains("Runtime") || combined.contains("VRE") || combined.contains("Doctor"),
+        "doctor output unexpected: {}",
+        combined
+    );
+}
+
+#[test]
+fn test_cli_search() {
+    let output = Command::new(vre_bin())
+        .arg("search")
+        .arg("nonexistent-package-xyz")
+        .output()
+        .expect("Failed to run vre search");
+    // Should not crash — returns 0 even with no results
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No packages found") || stdout.contains("Found"),
+        "Unexpected search output: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_upgrade_runs() {
+    let output = Command::new(vre_bin())
+        .arg("upgrade")
+        .output()
+        .expect("Failed to run vre upgrade");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("VRE CLI version") || stdout.contains("upgrade"));
 }

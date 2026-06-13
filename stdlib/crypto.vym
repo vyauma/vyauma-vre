@@ -1,7 +1,10 @@
-fn random_bytes(len) {
-    return ffi_crypto_random_bytes(len);
-}
+// Crypto Module
 
-fn sha256(data) {
-    return ffi_crypto_sha256(data);
-}
+export fn random_bytes(len: Int32) -> Array<Int32>:
+    return ffi_crypto_random_bytes(len)
+
+export fn sha256(data: String) -> String:
+    return ffi_crypto_sha256(data)
+
+export fn bcrypt(password: String) -> String:
+    return ffi_crypto_bcrypt(password)

@@ -1,0 +1,9 @@
+[package]
+name = "vyauma-vm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vyauma-frontend = { path = "../vyauma-frontend" }
+serde_json = "1.0"
+lazy_static = "1.4"

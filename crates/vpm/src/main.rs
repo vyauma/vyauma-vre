@@ -61,7 +61,7 @@ fn print_usage() {
     println!();
     println!("ENVIRONMENT:");
     println!("  VYAUMA_TOKEN       Registry auth token (used by `vpm publish`)");
-    println!("  VRE_MODULES_PATH   Override the vyauma_modules/ directory path");
+    println!("  VRE_MODULES_PATH   Override the vym_modules/ directory path");
     println!("  VRE_STD_PATH       Override the std library directory path");
 }
 

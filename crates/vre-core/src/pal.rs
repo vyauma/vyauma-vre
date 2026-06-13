@@ -3,7 +3,8 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::collections::HashMap;
 use std::process::Command;
-use std::net::{TcpStream, TcpListener, UdpSocket, ToSocketAddrs, IpAddr};
+use std::net::{UdpSocket, ToSocketAddrs, IpAddr, TcpStream as StdTcpStream};
+use tokio::net::{TcpStream, TcpListener};
 use std::sync::{Arc, Mutex};
 
 // ─── HTTP Types ──────────────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ pub enum Signal {
 
 // ─── PAL Trait ───────────────────────────────────────────────────────────────
 
+#[async_trait::async_trait]
 pub trait PlatformAbstractionLayer: Send + Sync {
     // ── Filesystem ───────────────────────────────────────────────────────────
     fn read_to_string(&self, path: &Path) -> Result<String, String>;
@@ -107,8 +109,8 @@ pub trait PlatformAbstractionLayer: Send + Sync {
     fn handle_interrupt(&self) -> Result<(), String>;
 
     // ── TCP / UDP / DNS ──────────────────────────────────────────────────────
-    fn tcp_connect(&self, addr: &str) -> Result<TcpStream, String>;
-    fn tcp_bind(&self, addr: &str) -> Result<TcpListener, String>;
+    async fn tcp_connect(&self, addr: &str) -> Result<TcpStream, String>;
+    async fn tcp_bind(&self, addr: &str) -> Result<TcpListener, String>;
     fn udp_bind(&self, addr: &str) -> Result<UdpSocket, String>;
     fn resolve_dns(&self, hostname: &str) -> Result<Vec<IpAddr>, String>;
 
@@ -144,7 +146,7 @@ pub struct OsPal {
     timers:          Arc<Mutex<HashMap<usize, Arc<std::sync::atomic::AtomicBool>>>>,
     next_timer_id:   std::sync::Mutex<usize>,
     /// Active WebSocket connections
-    websockets:      std::sync::Mutex<HashMap<usize, WebSocket<MaybeTlsStream<TcpStream>>>>,
+    websockets:      std::sync::Mutex<HashMap<usize, WebSocket<MaybeTlsStream<StdTcpStream>>>>,
     next_ws_id:      std::sync::Mutex<usize>,
 }
 
@@ -163,6 +165,7 @@ impl Default for OsPal {
     }
 }
 
+#[async_trait::async_trait]
 impl PlatformAbstractionLayer for OsPal {
     // ── Filesystem ───────────────────────────────────────────────────────────
 
@@ -381,12 +384,12 @@ impl PlatformAbstractionLayer for OsPal {
 
     // ── TCP / UDP / DNS ──────────────────────────────────────────────────────
 
-    fn tcp_connect(&self, addr: &str) -> Result<TcpStream, String> {
-        TcpStream::connect(addr).map_err(|e| e.to_string())
+    async fn tcp_connect(&self, addr: &str) -> Result<TcpStream, String> {
+        TcpStream::connect(addr).await.map_err(|e| e.to_string())
     }
 
-    fn tcp_bind(&self, addr: &str) -> Result<TcpListener, String> {
-        TcpListener::bind(addr).map_err(|e| e.to_string())
+    async fn tcp_bind(&self, addr: &str) -> Result<TcpListener, String> {
+        TcpListener::bind(addr).await.map_err(|e| e.to_string())
     }
 
     fn udp_bind(&self, addr: &str) -> Result<UdpSocket, String> {

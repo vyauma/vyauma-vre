@@ -1,0 +1,15 @@
+// Database Module
+
+export class Database:
+    id: Int32
+
+    fn query(sql: String, params: Array<Any>) -> Array<Dict<String, Any>>:
+        return ffi_sql_query(self.id, sql, params)
+    
+    fn execute(sql: String, params: Array<Any>) -> Int32:
+        return ffi_sql_execute(self.id, sql, params)
+
+export fn connect(driver: String, url: String) -> Database:
+    let mut db = new Database(0)
+    db.id = ffi_sql_connect(driver, url)
+    return db

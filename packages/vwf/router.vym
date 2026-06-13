@@ -1,0 +1,43 @@
+
+export class Router:
+    // We will use a Dict for each method, mapping path to a handler name/reference
+    // However, Vyauma currently lacks function pointers, so we will use dynamic dispatch via strings and a big match/if block or we can just keep it simple.
+    // For now, let's just use a simple list of routes.
+    routes_method: Array<String>
+    routes_path: Array<String>
+    
+    // In a real framework we'd pass a closure or function pointer.
+    // For now we'll just print the matching route and return a mock response.
+    
+
+    fn get(path: String):
+        ffi_array_push(self.routes_method, "GET")
+        ffi_array_push(self.routes_path, path)
+        
+    fn post(path: String):
+        ffi_array_push(self.routes_method, "POST")
+        ffi_array_push(self.routes_path, path)
+
+    fn route(ctx: Context):
+        let mut i = 0.0
+        let len = ffi_array_len(self.routes_path)
+        let mut matched = false
+        
+        while i < len:
+            if self.routes_method[i] == ctx.method:
+                if self.routes_path[i] == ctx.path:
+                    matched = true
+                    // Call handler (mocked)
+                    ffi_console_println("Matched route: " + ctx.method + " " + ctx.path)
+                    ctx.send_json("{\"status\":\"success\", \"message\":\"Route matched!\"}")
+                    return
+            i = i + 1.0
+            
+        if matched == false:
+            ctx.send_json_status("{\"error\":\"Not Found\"}", 404.0)
+
+export fn new_router() -> Router:
+    let rm: Array<String> = []
+    let rp: Array<String> = []
+    let r = new Router(rm, rp)
+    return r

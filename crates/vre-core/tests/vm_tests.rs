@@ -21,7 +21,7 @@ fn run_vm_with_config(
     capabilities.grant(Capability::new("io.read"));
     capabilities.grant(Capability::new("io.write"));
 
-    let mut vm = VirtualMachine::new(config, instructions, constants, vec![], capabilities).unwrap();
+    let mut vm = VirtualMachine::new(config, instructions, constants, vec![], capabilities, std::collections::HashMap::new()).unwrap();
     vm.execute()?;
     vm.peek_stack().cloned()
 }
@@ -207,7 +207,7 @@ fn test_unconditional_jump() {
     ];
 
     let capabilities = CapabilityRegistry::new();
-    let mut vm = VirtualMachine::new(VreConfig::default(), instructions, constants, vec![], capabilities).unwrap();
+    let mut vm = VirtualMachine::new(VreConfig::default(), instructions, constants, vec![], capabilities, std::collections::HashMap::new()).unwrap();
     vm.execute().unwrap();
     // Stack should be empty because we jumped past the push
     assert!(vm.peek_stack().is_err());
@@ -330,12 +330,12 @@ fn test_syscall_print_capability_enforced() {
     // Case 1: Run with capabilities granted -> should succeed
     let mut caps_granted = CapabilityRegistry::new();
     caps_granted.grant(Capability::new("io.write"));
-    let mut vm = VirtualMachine::new(VreConfig::default(), instructions.clone(), constants.clone(), vec![], caps_granted).unwrap();
+    let mut vm = VirtualMachine::new(VreConfig::default(), instructions.clone(), constants.clone(), vec![], caps_granted, std::collections::HashMap::new()).unwrap();
     assert!(vm.execute().is_ok());
 
     // Case 2: Run without capability granted -> should fail with CapabilityNotGranted
     let caps_denied = CapabilityRegistry::new();
-    let mut vm = VirtualMachine::new(VreConfig::default(), instructions, constants, vec![], caps_denied).unwrap();
+    let mut vm = VirtualMachine::new(VreConfig::default(), instructions, constants, vec![], caps_denied, std::collections::HashMap::new()).unwrap();
     let err = vm.execute().unwrap_err();
     assert!(matches!(err, VreError::CapabilityNotGranted));
 }

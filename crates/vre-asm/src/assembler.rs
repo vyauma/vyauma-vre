@@ -261,7 +261,7 @@ impl Assembler {
                 }
 
                 OpCode::Yield | OpCode::Await | OpCode::SpawnDynamic => {}
-                OpCode::AndBool | OpCode::OrBool => {}
+                OpCode::AndBool | OpCode::OrBool | OpCode::NotBool | OpCode::NewDict => {}
 
                 OpCode::NewClosure => {
                     // u32 func addr + u16 upvalue count
@@ -270,8 +270,8 @@ impl Assembler {
                     instr_bytes.extend_from_slice(&(target_offset as u32).to_be_bytes());
                     instr_bytes.extend_from_slice(&upcount.to_be_bytes());
                 }
-                OpCode::CallDynamic => {
-                    // u16 arg_count + u16 local_count
+                OpCode::CallDynamic | OpCode::NewClass | OpCode::CallMethod => {
+                    // u16 + u16
                     let ac = parse_u16_operand(&instr.operands[0])?;
                     let lc = parse_u16_operand(&instr.operands[1])?;
                     instr_bytes.extend_from_slice(&ac.to_be_bytes());
@@ -394,6 +394,10 @@ fn parse_opcode(name: &str) -> Option<OpCode> {
         "trystart" => Some(OpCode::TryStart),
         "tryend" => Some(OpCode::TryEnd),
         "throw" => Some(OpCode::Throw),
+        "not_bool" | "notbool" => Some(OpCode::NotBool),
+        "newdict" | "new_dict" => Some(OpCode::NewDict),
+        "newclass" | "new_class" => Some(OpCode::NewClass),
+        "callmethod" | "call_method" => Some(OpCode::CallMethod),
         _ => None,
     }
 }
@@ -416,7 +420,7 @@ fn instruction_size(instr: &AsmInstruction) -> Result<usize, String> {
         OpCode::Yield | OpCode::Await |
         OpCode::LoadUpvalue | OpCode::StoreUpvalue |
         OpCode::BoxValue | OpCode::LoadBox | OpCode::StoreBox => Ok(1),
-        OpCode::AndBool | OpCode::OrBool => Ok(1),
+        OpCode::AndBool | OpCode::OrBool | OpCode::NotBool | OpCode::NewDict => Ok(1),
 
         // Opcode + u8
         OpCode::Syscall => Ok(2),
@@ -431,7 +435,7 @@ fn instruction_size(instr: &AsmInstruction) -> Result<usize, String> {
         OpCode::Call | OpCode::NewClosure => Ok(7),
 
         // Opcode + u16 + u16
-        OpCode::CallDynamic => Ok(5),
+        OpCode::CallDynamic | OpCode::NewClass | OpCode::CallMethod => Ok(5),
         OpCode::SpawnDynamic => Ok(1),
 
         // Opcode + u16 + u8 + 3 bytes padding

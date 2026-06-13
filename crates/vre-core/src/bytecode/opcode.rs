@@ -44,7 +44,8 @@ pub enum OpCode {
     // String operations
     AddStr = 0x54,
     // Logical
-    AndBool = 0x52, OrBool = 0x53,
+    AndBool = 0x52, OrBool = 0x53, NotBool = 0x55,
+    EqualBool = 0x56, NotEqualBool = 0x57,
 
     // Control flow
     Jump     = 0x60,
@@ -72,6 +73,9 @@ pub enum OpCode {
     BoxValue = 0x7A,
     LoadBox = 0x7B,
     StoreBox = 0x7C,
+    NewDict = 0x7D,
+    NewClass = 0x7E,
+    CallMethod = 0x7F,
 
     // Exception Handling
     TryStart = 0x80,
@@ -117,7 +121,8 @@ impl OpCode {
             0x4A => Some(OpCode::EqualF64), 0x4B => Some(OpCode::NotEqualF64), 0x4C => Some(OpCode::LessF64), 0x4D => Some(OpCode::LessEqualF64), 0x4E => Some(OpCode::GreaterF64), 0x4F => Some(OpCode::GreaterEqualF64),
             0x50 => Some(OpCode::EqualStr), 0x51 => Some(OpCode::NotEqualStr),
             0x54 => Some(OpCode::AddStr),
-            0x52 => Some(OpCode::AndBool), 0x53 => Some(OpCode::OrBool),
+            0x52 => Some(OpCode::AndBool), 0x53 => Some(OpCode::OrBool), 0x55 => Some(OpCode::NotBool),
+            0x56 => Some(OpCode::EqualBool), 0x57 => Some(OpCode::NotEqualBool),
 
             0x60 => Some(OpCode::Jump),
             0x61 => Some(OpCode::JumpIf),
@@ -142,6 +147,9 @@ impl OpCode {
             0x7A => Some(OpCode::BoxValue),
             0x7B => Some(OpCode::LoadBox),
             0x7C => Some(OpCode::StoreBox),
+            0x7D => Some(OpCode::NewDict),
+            0x7E => Some(OpCode::NewClass),
+            0x7F => Some(OpCode::CallMethod),
 
             0x80 => Some(OpCode::TryStart),
             0x81 => Some(OpCode::TryEnd),

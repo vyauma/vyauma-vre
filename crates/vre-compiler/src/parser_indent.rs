@@ -369,7 +369,7 @@ impl<'a> ParserIndent<'a> {
                     match expr {
                         Expr::Identifier(name, _) => Ok(Stmt::Assign(name, rhs)),
                         Expr::PropertyAccess(obj, prop, _) => Ok(Stmt::AssignProperty(obj, prop, rhs)),
-                        Expr::IndexAccess(arr, idx) => {
+                        Expr::IndexAccess(arr, idx, _) => {
                             if let Expr::Identifier(name, _) = *arr {
                                 Ok(Stmt::AssignIndex(name, *idx, rhs))
                             } else {
@@ -389,11 +389,21 @@ impl<'a> ParserIndent<'a> {
     }
 
     fn parse_let_statement(&mut self) -> Result<Stmt, String> {
-        let name = match &self.peek_token.kind {
+        let mut name = match &self.peek_token.kind {
             TokenKind::Identifier(id) => id.clone(),
             _ => return Err("Expected identifier after 'let'".to_string()),
         };
         self.next_token();
+
+        let mut is_mut = false;
+        if name == "mut" {
+            is_mut = true;
+            name = match &self.peek_token.kind {
+                TokenKind::Identifier(id) => id.clone(),
+                _ => return Err("Expected identifier after 'let mut'".to_string()),
+            };
+            self.next_token();
+        }
 
         let mut type_annotation = None;
         if self.peek_token.kind == TokenKind::Colon {
@@ -411,7 +421,11 @@ impl<'a> ParserIndent<'a> {
             self.next_token();
         }
 
-        Ok(Stmt::Let(name, type_annotation, expr))
+        if is_mut {
+            Ok(Stmt::LetMut(name, type_annotation, expr))
+        } else {
+            Ok(Stmt::Let(name, type_annotation, expr))
+        }
     }
 
     fn parse_try_catch_statement(&mut self) -> Result<Stmt, String> {
@@ -791,7 +805,7 @@ impl<'a> ParserIndent<'a> {
         self.next_token();
         let index = self.parse_expression(Precedence::Lowest)?;
         self.expect_peek(TokenKind::RBracket)?;
-        Ok(Expr::IndexAccess(Box::new(left), Box::new(index)))
+        Ok(Expr::IndexAccess(Box::new(left), Box::new(index), None))
     }
 
     fn parse_property_access(&mut self, left: Expr) -> Result<Expr, String> {

@@ -1,0 +1,37 @@
+import "./packages/auth/auth.vym" as auth
+
+fn main():
+    ffi_console_println("Testing VyaumaAuth...")
+    
+    let a = auth::new_auth("super-secret-key-12345678901234567890")
+    
+    ffi_console_println("Testing Password Hashing...")
+    let pass = "my_secure_password"
+    let hashed = a.hash_password(pass)
+    ffi_console_println(hashed)
+    
+    let is_valid = a.verify_password(pass, hashed)
+    if is_valid:
+        ffi_console_println("Password Verify: PASS")
+    else:
+        ffi_console_println("Password Verify: FAIL")
+    
+    ffi_console_println("Testing JWT...")
+    let payload = "{\"user_id\":\"123\",\"role\":\"admin\"}"
+    let token = a.generate_jwt(payload, 3600.0)
+    ffi_console_println(token)
+    
+    let decoded_payload = a.verify_jwt(token)
+    if decoded_payload == payload:
+        ffi_console_println("JWT Verify: PASS")
+    else:
+        ffi_console_println("JWT Verify: FAIL")
+    
+    let invalid_token = token + "bad"
+    let bad_payload = a.verify_jwt(invalid_token)
+    if bad_payload == "":
+        ffi_console_println("JWT Invalid Verify: PASS")
+    else:
+        ffi_console_println("JWT Invalid Verify: FAIL")
+    
+    ffi_console_println("Auth Tests Completed Successfully!")

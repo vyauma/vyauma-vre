@@ -1,0 +1,35 @@
+export class Context:
+    client_fd: Float64
+    raw_req: Dict<String, String>
+    method: String
+    path: String
+    body: String
+    
+    // In Vyauma v1/v2, constructors cannot take arguments natively, but since we are using `new Class()` it might just work if we set properties after creation.
+    // Actually, Vyauma uses `new Class(args)` and transforms it to `StructInit`. Wait, no, `StructInit` doesn't take positional arguments for `Class` initialization, wait, let me just set fields manually.
+    
+
+
+    fn send_json(json_str: String):
+        self.send_json_status(json_str, 200.0)
+        
+    fn send_json_status(json_str: String, status: Float64):
+        let mut status_str = "200 OK"
+        if status == 404.0:
+            status_str = "404 Not Found"
+        else:
+            if status == 500.0:
+                status_str = "500 Internal Server Error"
+        
+        let header = "HTTP/1.1 " + status_str + "\r\nContent-Type: application/json\r\n\r\n"
+        let full_response = header + json_str
+        
+        let bytes = string_to_bytes(full_response)
+        write(self.client_fd, bytes)
+
+export fn new_context(fd: Float64, req: Dict<String, String>) -> Context:
+    let method = req["method"]
+    let path = req["path"]
+    let body = req["body"]
+    let c = new Context(fd, req, method, path, body)
+    return c

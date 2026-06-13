@@ -1,0 +1,38 @@
+export class Database:
+    driver: String
+    url: String
+    pool_id: Float64
+    
+    fn query(sql: String, params: Array<String>) -> Array<Dict<String, Any>>:
+        let result = ffi_db_query(self.pool_id, sql, params)
+        return result
+        
+    fn execute(sql: String, params: Array<String>) -> Float64:
+        let result = ffi_db_execute(self.pool_id, sql, params)
+        return result
+
+export fn connect(driver: String, url: String) -> Database:
+    let pool_id = ffi_db_connect(driver, url)
+    let db = new Database(driver, url, pool_id)
+    return db
+
+// Simple ActiveRecord mock-up for the test
+export class Model:
+    db: Database
+    table: String
+    
+    fn create(payload: Dict<String, String>) -> Float64:
+        let name = payload["name"]
+        let email = payload["email"]
+        ffi_console_println("Inside Model.create, name is: " + name)
+        let sql = "INSERT INTO " + self.table + " (name, email) VALUES (?, ?)"
+        let params: Array<String> = [name, email]
+        let affected = self.db.execute(sql, params)
+        return affected
+        
+    fn where_query(sql_cond: String, params: Array<String>) -> Array<Dict<String, Any>>:
+        let sql = "SELECT * FROM " + self.table + " WHERE " + sql_cond
+        return self.db.query(sql, params)
+
+export fn new_model(db: Database, table: String) -> Model:
+    return new Model(db, table)

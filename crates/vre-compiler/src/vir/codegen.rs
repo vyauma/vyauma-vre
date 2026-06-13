@@ -216,6 +216,12 @@ impl VirCodegen {
                 self.emit_opcode(OpCode::AddF64);
                 self.store_val(val, ctx);
             }
+            Instruction::AddStr(l, r) => {
+                self.load_val(*l, ctx);
+                self.load_val(*r, ctx);
+                self.emit_opcode(OpCode::AddStr);
+                self.store_val(val, ctx);
+            }
             Instruction::Sub(l, r) => {
                 self.load_val(*l, ctx);
                 self.load_val(*r, ctx);
@@ -240,10 +246,22 @@ impl VirCodegen {
                 self.emit_opcode(OpCode::EqualF64);
                 self.store_val(val, ctx);
             }
+            Instruction::EqStr(l, r) => {
+                self.load_val(*l, ctx);
+                self.load_val(*r, ctx);
+                self.emit_opcode(OpCode::EqualStr);
+                self.store_val(val, ctx);
+            }
             Instruction::NotEq(l, r) => {
                 self.load_val(*l, ctx);
                 self.load_val(*r, ctx);
                 self.emit_opcode(OpCode::NotEqualF64);
+                self.store_val(val, ctx);
+            }
+            Instruction::NotEqStr(l, r) => {
+                self.load_val(*l, ctx);
+                self.load_val(*r, ctx);
+                self.emit_opcode(OpCode::NotEqualStr);
                 self.store_val(val, ctx);
             }
             Instruction::Lt(l, r) => {
@@ -445,6 +463,140 @@ impl VirCodegen {
                 self.emit_opcode(OpCode::ExportValue);
                 self.emit_u16(name_idx);
             }
+            Instruction::Rem(l, r) => {
+                self.load_val(*l, ctx);
+                self.load_val(*r, ctx);
+                self.emit_opcode(OpCode::ModF64);
+                self.store_val(val, ctx);
+            }
+            Instruction::Not(v) => {
+                self.load_val(*v, ctx);
+                self.emit_opcode(OpCode::NotBool);
+                self.store_val(val, ctx);
+            }
+            Instruction::And(l, r) => {
+                self.load_val(*l, ctx);
+                self.load_val(*r, ctx);
+                self.emit_opcode(OpCode::AndBool);
+                self.store_val(val, ctx);
+            }
+            Instruction::Or(l, r) => {
+                self.load_val(*l, ctx);
+                self.load_val(*r, ctx);
+                self.emit_opcode(OpCode::OrBool);
+                self.store_val(val, ctx);
+            }
+            Instruction::DictLiteral(pairs) => {
+                for (k, v_ref) in pairs {
+                    self.load_val(*k, ctx);
+                    self.load_val(*v_ref, ctx);
+                }
+                let count_idx = self.add_constant(VmValue::Float64(pairs.len() as f64));
+                self.emit_opcode(OpCode::Push);
+                self.emit_u16(count_idx);
+                self.emit_opcode(OpCode::NewStruct);
+                self.store_val(val, ctx);
+            }
+            Instruction::MethodCall(obj, name, args) => {
+                self.load_val(*obj, ctx);
+                for arg in args {
+                    self.load_val(*arg, ctx);
+                }
+                let name_idx = self.add_constant(VmValue::String(name.clone()));
+                self.emit_opcode(OpCode::CallMethod);
+                self.emit_u16(name_idx);
+                self.emit_u16(args.len() as u16);
+                self.store_val(val, ctx);
+            }
+            Instruction::NewClass(name, args) => {
+                for arg in args {
+                    self.load_val(*arg, ctx);
+                }
+                let name_idx = self.add_constant(VmValue::String(name.clone()));
+                self.emit_opcode(OpCode::NewClass);
+                self.emit_u16(name_idx);
+                self.emit_u16(args.len() as u16);
+                self.store_val(val, ctx);
+            }
+            Instruction::Syscall(code, args) => {
+                for arg in args {
+                    self.load_val(*arg, ctx);
+                }
+                self.emit_opcode(OpCode::Syscall);
+                self.emit_u8(*code);
+                
+                // If it's a print syscall, legacy compiler expects to push 0.0 afterwards.
+                if *code == 0x01 {
+                    let idx = self.add_constant(VmValue::Float64(0.0));
+                    self.emit_opcode(OpCode::Push);
+                    self.emit_u16(idx);
+                }
+                self.store_val(val, ctx);
+            }
+            Instruction::Throw(v) => {
+                self.load_val(*v, ctx);
+                self.emit_opcode(OpCode::Throw);
+            }
+            Instruction::SetupTry(catch_block) => {
+                self.emit_opcode(OpCode::TryStart);
+                let offset = self.instructions.len();
+                self.emit_u32(0); // target placeholder
+                ctx.unresolved_tries.push((offset, *catch_block));
+            }
+            Instruction::PopTry => {
+                self.emit_opcode(OpCode::TryEnd);
+            }
+            Instruction::PropertyAccess(obj, prop) => {
+                self.load_val(*obj, ctx);
+                let prop_idx = self.add_constant(VmValue::String(prop.clone()));
+                self.emit_opcode(OpCode::Push);
+                self.emit_u16(prop_idx);
+                self.emit_opcode(OpCode::LoadElement);
+                self.store_val(val, ctx);
+            }
+            Instruction::IndexAccess(arr, idx) => {
+                self.load_val(*arr, ctx);
+                self.load_val(*idx, ctx);
+                self.emit_opcode(OpCode::LoadElement);
+                self.store_val(val, ctx);
+            }
+            Instruction::AssignProperty(obj, prop, src_val) => {
+                self.load_val(*obj, ctx);
+                let prop_idx = self.add_constant(VmValue::String(prop.clone()));
+                self.emit_opcode(OpCode::Push);
+                self.emit_u16(prop_idx);
+                self.load_val(*src_val, ctx);
+                self.emit_opcode(OpCode::StoreElement);
+            }
+            Instruction::AssignIndex(obj, idx, src_val) => {
+                self.load_val(*obj, ctx);
+                self.load_val(*idx, ctx);
+                self.load_val(*src_val, ctx);
+                self.emit_opcode(OpCode::StoreElement);
+            }
+            Instruction::StructInit(name, fields) => {
+                for (k, v_ref) in fields {
+                    let k_idx = self.add_constant(VmValue::String(k.clone()));
+                    self.emit_opcode(OpCode::Push);
+                    self.emit_u16(k_idx);
+                    self.load_val(*v_ref, ctx);
+                }
+                let count_idx = self.add_constant(VmValue::Float64(fields.len() as f64));
+                self.emit_opcode(OpCode::Push);
+                self.emit_u16(count_idx);
+                self.emit_opcode(OpCode::NewStruct);
+                self.store_val(val, ctx);
+            }
+            Instruction::ArrayLiteral(elems) => {
+                for elem in elems {
+                    self.load_val(*elem, ctx);
+                }
+                let count_idx = self.add_constant(VmValue::Float64(elems.len() as f64));
+                self.emit_opcode(OpCode::Push);
+                self.emit_u16(count_idx);
+                self.emit_opcode(OpCode::NewArray);
+                self.store_val(val, ctx);
+            }
             _ => {
                 // Not fully implemented for all yet.
             }
@@ -479,6 +631,10 @@ impl VirCodegen {
     
     fn emit_opcode(&mut self, op: OpCode) {
         self.instructions.push(op as u8);
+    }
+    
+    fn emit_u8(&mut self, v: u8) {
+        self.instructions.push(v);
     }
     
     fn emit_u16(&mut self, v: u16) {

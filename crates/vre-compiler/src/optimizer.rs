@@ -59,6 +59,7 @@ impl AstOptimizer {
     fn optimize_statement(&mut self, stmt: &mut Stmt) {
         match stmt {
             Stmt::Let(_, _, expr) => self.optimize_expression(expr),
+            Stmt::LetMut(_, _, expr) => self.optimize_expression(expr),
             Stmt::Assign(_, expr) => self.optimize_expression(expr),
             Stmt::AssignIndex(_, index_expr, value_expr) => {
                 self.optimize_expression(index_expr);
@@ -141,7 +142,7 @@ impl AstOptimizer {
                     self.optimize_expression(v);
                 }
             }
-            Expr::IndexAccess(arr, idx) => {
+            Expr::IndexAccess(arr, idx, _) => {
                 self.optimize_expression(arr);
                 self.optimize_expression(idx);
             }
@@ -169,7 +170,27 @@ impl AstOptimizer {
                     self.optimize_expression(arg);
                 }
             }
-            Expr::Identifier(_, _) | Expr::Number(_) | Expr::Boolean(_) | Expr::StringLiteral(_) => {}
+            Expr::NamedCall(_, args, _) => {
+                for arg in args {
+                    self.optimize_expression(&mut arg.value);
+                }
+            }
+            Expr::NamedMethodCall(obj, _, args, _) => {
+                self.optimize_expression(obj);
+                for arg in args {
+                    self.optimize_expression(&mut arg.value);
+                }
+            }
+            Expr::NamedNewClass(_, args) => {
+                for arg in args {
+                    self.optimize_expression(&mut arg.value);
+                }
+            }
+            Expr::Closure { body, .. } => {
+                self.optimize_block(body);
+            }
+            Expr::Identifier(_, _) | Expr::Number(_) | Expr::Boolean(_) | Expr::StringLiteral(_) => {},
+            _ => {},
         }
     }
 }

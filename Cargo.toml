@@ -2,7 +2,10 @@
 members = [
     "crates/vre-core",
     "crates/vre-cli",
-    "crates/vre-asm", "crates/vre-compiler", "crates/vre-debug", "crates/vpm",
+    "crates/vre-asm", "crates/vre-compiler", "crates/vre-debug", "crates/vpm", "crates/vyauma-frontend", "crates/vyauma-vm",
+    "crates/vyauma-registry",
+    "crates/vfmt",
+    "crates/vyauma-analyzer"
 ]
 
 resolver = "2"

@@ -332,7 +332,8 @@ fn disassemble(vm: &VirtualMachine, ip: usize) -> (String, usize) {
         OpCode::LessF64  => "LT_F64".to_string(),    OpCode::LessEqualF64 => "LE_F64".to_string(),
         OpCode::GreaterF64 => "GT_F64".to_string(),  OpCode::GreaterEqualF64 => "GE_F64".to_string(),
         OpCode::EqualStr => "EQ_STR".to_string(),    OpCode::NotEqualStr => "NE_STR".to_string(),
-        OpCode::AndBool  => "AND_BOOL".to_string(),  OpCode::OrBool => "OR_BOOL".to_string(),
+        OpCode::EqualBool => "EQ_BOOL".to_string(),  OpCode::NotEqualBool => "NE_BOOL".to_string(),
+        OpCode::AndBool  => "AND_BOOL".to_string(),  OpCode::OrBool => "OR_BOOL".to_string(), OpCode::NotBool => "NOT_BOOL".to_string(),
 
         // ── Control Flow ───────────────────────────────────────────────
         OpCode::Jump => {
@@ -368,6 +369,7 @@ fn disassemble(vm: &VirtualMachine, ip: usize) -> (String, usize) {
         OpCode::LoadElement  => "LOAD_ELEMENT".to_string(),
         OpCode::StoreElement => "STORE_ELEMENT".to_string(),
         OpCode::NewStruct    => "NEW_STRUCT".to_string(),
+        OpCode::NewDict      => "NEW_DICT".to_string(),
 
         // ── FFI / Native ───────────────────────────────────────────────
         OpCode::CallNative => {
@@ -416,6 +418,18 @@ fn disassemble(vm: &VirtualMachine, ip: usize) -> (String, usize) {
             let local_count = read_u16(insts, next_ip + 2);
             next_ip += 4;
             format!("CALL_DYNAMIC args={} locals={}", arg_count, local_count)
+        }
+        OpCode::NewClass => {
+            let name_idx = read_u16(insts, next_ip);
+            let arg_count = read_u16(insts, next_ip + 2);
+            next_ip += 4;
+            format!("NEW_CLASS name=[{}] args={}", name_idx, arg_count)
+        }
+        OpCode::CallMethod => {
+            let name_idx = read_u16(insts, next_ip);
+            let arg_count = read_u16(insts, next_ip + 2);
+            next_ip += 4;
+            format!("CALL_METHOD name=[{}] args={}", name_idx, arg_count)
         }
 
         // ── System ─────────────────────────────────────────────────────

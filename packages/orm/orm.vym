@@ -1,0 +1,62 @@
+import "../../stdlib/db.vym" as db
+
+export class Model:
+    table: String
+    conn: Database
+
+    fn find(id: Any) -> Any:
+        let sql = "SELECT * FROM " + self.table + " WHERE id = ?"
+        let results = self.conn.query(sql, [id])
+        if ffi_array_len(results) > 0:
+            return results[0]
+        return {}
+
+    fn create(data: Any) -> Int32:
+        let cols: Array<String> = []
+        let vals: Array<Any> = []
+        let placeholders: Array<String> = []
+        
+        let keys = ffi_dict_keys(data)
+        let mut i = 0
+        let len = ffi_array_len(keys)
+        
+        while i < len:
+            let k = keys[i]
+            ffi_array_push(cols, k)
+            ffi_array_push(vals, data[k])
+            ffi_array_push(placeholders, "?")
+            i = i + 1
+            
+        let col_str = ffi_string_join(cols, ", ")
+        let ph_str = ffi_string_join(placeholders, ", ")
+        let sql = "INSERT INTO " + self.table + " (" + col_str + ") VALUES (" + ph_str + ")"
+        
+        return self.conn.execute(sql, vals)
+
+    fn update(id: Any, data: Any) -> Int32:
+        let setters: Array<String> = []
+        let vals: Array<Any> = []
+        
+        let keys = ffi_dict_keys(data)
+        let mut i = 0
+        let len = ffi_array_len(keys)
+        
+        while i < len:
+            let k = keys[i]
+            ffi_array_push(setters, k + " = ?")
+            ffi_array_push(vals, data[k])
+            i = i + 1
+            
+        ffi_array_push(vals, id)
+            
+        let set_str = ffi_string_join(setters, ", ")
+        let sql = "UPDATE " + self.table + " SET " + set_str + " WHERE id = ?"
+        
+        return self.conn.execute(sql, vals)
+
+    fn delete(id: Any) -> Int32:
+        let sql = "DELETE FROM " + self.table + " WHERE id = ?"
+        return self.conn.execute(sql, [id])
+
+export fn new_model(table_name: String, connection: Any) -> Model:
+    return new Model(table_name, connection)

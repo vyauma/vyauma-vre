@@ -355,7 +355,7 @@ impl<'a> Parser<'a> {
                     match expr {
                         Expr::Identifier(name, _) => Ok(Stmt::Assign(name, rhs)),
                         Expr::PropertyAccess(obj, prop, _) => Ok(Stmt::AssignProperty(obj, prop, rhs)),
-                        Expr::IndexAccess(arr, idx) => {
+                        Expr::IndexAccess(arr, idx, _) => {
                             if let Expr::Identifier(name, _) = *arr {
                                 Ok(Stmt::AssignIndex(name, *idx, rhs))
                             } else {
@@ -375,6 +375,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_let_statement(&mut self) -> Result<Stmt, String> {
+        let mut is_mut = false;
+        if self.peek_token.kind == TokenKind::Mut {
+            self.next_token();
+            is_mut = true;
+        }
+
         let name = match &self.peek_token.kind {
             TokenKind::Identifier(id) => id.clone(),
             _ => return Err("Expected identifier after 'let'".to_string()),
@@ -397,7 +403,11 @@ impl<'a> Parser<'a> {
             self.next_token();
         }
 
-        Ok(Stmt::Let(name, type_annotation, expr))
+        if is_mut {
+            Ok(Stmt::LetMut(name, type_annotation, expr))
+        } else {
+            Ok(Stmt::Let(name, type_annotation, expr))
+        }
     }
 
     fn parse_try_catch_statement(&mut self) -> Result<Stmt, String> {
@@ -584,6 +594,9 @@ impl<'a> Parser<'a> {
             TokenKind::New => {
                 self.parse_new_expression()
             }
+            TokenKind::At => {
+                self.parse_closure()
+            }
             _ => Err(format!("No prefix parse function for {:?}", self.current_token)),
         }
     }
@@ -615,6 +628,59 @@ impl<'a> Parser<'a> {
         Ok(Expr::DictLiteral(elements))
     }
 
+    fn parse_closure(&mut self) -> Result<Expr, String> {
+        self.next_token(); // Move past '@'
+        
+        self.expect_peek(TokenKind::LParen)?;
+        
+        let mut params = Vec::new();
+        if self.peek_token.kind != TokenKind::RParen {
+            self.next_token();
+            let param_name = match &self.current_token.kind {
+                TokenKind::Identifier(id) => id.clone(),
+                _ => return Err("Expected parameter name in closure".to_string()),
+            };
+            
+            let mut param_type = None;
+            if self.peek_token.kind == TokenKind::Colon {
+                self.next_token();
+                self.next_token();
+                param_type = Some(self.parse_type()?);
+            }
+            params.push((param_name, param_type));
+
+            while self.peek_token.kind == TokenKind::Comma {
+                self.next_token(); // consume comma
+                self.next_token(); // move to id
+                let param_name = match &self.current_token.kind {
+                    TokenKind::Identifier(id) => id.clone(),
+                    _ => return Err("Expected parameter name after comma".to_string()),
+                };
+                
+                let mut param_type = None;
+                if self.peek_token.kind == TokenKind::Colon {
+                    self.next_token();
+                    self.next_token();
+                    param_type = Some(self.parse_type()?);
+                }
+                params.push((param_name, param_type));
+            }
+        }
+        self.expect_peek(TokenKind::RParen)?;
+        
+        let mut return_type = None;
+        if self.peek_token.kind == TokenKind::ReturnArrow {
+            self.next_token();
+            self.next_token();
+            return_type = Some(self.parse_type()?);
+        }
+        
+        self.expect_peek(TokenKind::LBrace)?;
+        let body = self.parse_block()?;
+        
+        Ok(Expr::Closure { params, return_type, body })
+    }
+
     fn parse_new_expression(&mut self) -> Result<Expr, String> {
         self.next_token(); // Move past 'new'
         let name = match &self.current_token.kind {
@@ -627,13 +693,18 @@ impl<'a> Parser<'a> {
             self.next_token(); // move inside '('
             
             let mut args = Vec::new();
+            let mut has_named = false;
             if self.current_token.kind != TokenKind::RParen {
-                args.push(self.parse_expression(Precedence::Lowest)?);
+                let arg = self.parse_argument()?;
+                if arg.name.is_some() { has_named = true; }
+                args.push(arg);
 
                 while self.peek_token.kind == TokenKind::Comma {
                     self.next_token(); // consume comma
                     self.next_token(); // move to next expr
-                    args.push(self.parse_expression(Precedence::Lowest)?);
+                    let arg = self.parse_argument()?;
+                    if arg.name.is_some() { has_named = true; }
+                    args.push(arg);
                 }
             }
             if self.peek_token.kind == TokenKind::RParen {
@@ -642,7 +713,12 @@ impl<'a> Parser<'a> {
                 return Err("Expected ')'".to_string());
             }
             
-            Ok(Expr::NewClass(name, args))
+            if has_named {
+                Ok(Expr::NamedNewClass(name, args))
+            } else {
+                let exprs = args.into_iter().map(|a| a.value).collect();
+                Ok(Expr::NewClass(name, exprs))
+            }
         } else {
             self.expect_peek(TokenKind::LBrace)?;
             let mut fields = Vec::new();
@@ -693,23 +769,47 @@ impl<'a> Parser<'a> {
         Ok(Expr::ArrayLiteral(elements))
     }
 
+    fn parse_argument(&mut self) -> Result<Argument, String> {
+        if let TokenKind::Identifier(id) = &self.current_token.kind {
+            if self.peek_token.kind == TokenKind::Assign {
+                let name = id.clone();
+                self.next_token(); // move to '='
+                self.next_token(); // move past '='
+                let value = self.parse_expression(Precedence::Lowest)?;
+                return Ok(Argument { name: Some(name), value });
+            }
+        }
+        let value = self.parse_expression(Precedence::Lowest)?;
+        Ok(Argument { name: None, value })
+    }
+
     fn parse_call_expression(&mut self, func_name: String) -> Result<Expr, String> {
         self.expect_peek(TokenKind::LParen)?; // Should be '('
         
         let mut args = Vec::new();
+        let mut has_named = false;
         if self.peek_token.kind != TokenKind::RParen {
             self.next_token();
-            args.push(self.parse_expression(Precedence::Lowest)?);
+            let arg = self.parse_argument()?;
+            if arg.name.is_some() { has_named = true; }
+            args.push(arg);
 
             while self.peek_token.kind == TokenKind::Comma {
                 self.next_token(); // consume comma
                 self.next_token(); // move to next expr
-                args.push(self.parse_expression(Precedence::Lowest)?);
+                let arg = self.parse_argument()?;
+                if arg.name.is_some() { has_named = true; }
+                args.push(arg);
             }
         }
         self.expect_peek(TokenKind::RParen)?;
 
-        Ok(Expr::Call(func_name, args, None))
+        if has_named {
+            Ok(Expr::NamedCall(func_name, args, None))
+        } else {
+            let exprs = args.into_iter().map(|a| a.value).collect();
+            Ok(Expr::Call(func_name, exprs, None))
+        }
     }
 
     fn parse_infix(&mut self, left: Expr) -> Result<Expr, String> {
@@ -743,7 +843,7 @@ impl<'a> Parser<'a> {
         self.next_token();
         let index = self.parse_expression(Precedence::Lowest)?;
         self.expect_peek(TokenKind::RBracket)?;
-        Ok(Expr::IndexAccess(Box::new(left), Box::new(index)))
+        Ok(Expr::IndexAccess(Box::new(left), Box::new(index), None))
     }
 
     fn parse_property_access(&mut self, left: Expr) -> Result<Expr, String> {
@@ -757,19 +857,29 @@ impl<'a> Parser<'a> {
             self.expect_peek(TokenKind::LParen)?; // move to '('
             
             let mut args = Vec::new();
+            let mut has_named = false;
             if self.peek_token.kind != TokenKind::RParen {
                 self.next_token(); // move to first arg
-                args.push(self.parse_expression(Precedence::Lowest)?);
+                let arg = self.parse_argument()?;
+                if arg.name.is_some() { has_named = true; }
+                args.push(arg);
 
                 while self.peek_token.kind == TokenKind::Comma {
                     self.next_token(); // consume comma
                     self.next_token(); // move to next expr
-                    args.push(self.parse_expression(Precedence::Lowest)?);
+                    let arg = self.parse_argument()?;
+                    if arg.name.is_some() { has_named = true; }
+                    args.push(arg);
                 }
             }
             self.expect_peek(TokenKind::RParen)?;
             
-            Ok(Expr::MethodCall(Box::new(left), prop, args, None))
+            if has_named {
+                Ok(Expr::NamedMethodCall(Box::new(left), prop, args, None))
+            } else {
+                let exprs = args.into_iter().map(|a| a.value).collect();
+                Ok(Expr::MethodCall(Box::new(left), prop, exprs, None))
+            }
         } else {
             Ok(Expr::PropertyAccess(Box::new(left), prop, None))
         }

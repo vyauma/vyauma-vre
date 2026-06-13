@@ -3,7 +3,7 @@
 //! Drives the full `vpm install` flow:
 //! 1. Read `vyauma.toml`
 //! 2. Resolve the dependency graph → `LockFile`
-//! 3. Download each package from the registry into `vyauma_modules/`
+//! 3. Download each package from the registry into `vym_modules/`
 //! 4. Write `vyauma.lock`
 
 use std::path::{Path, PathBuf};
@@ -21,11 +21,12 @@ pub fn install(manifest_path: &str) -> Result<(), String> {
     );
 
     // Resolve dependency graph
-    let lock = resolver::resolve(&manifest)?;
+    let existing_lock = LockFile::load();
+    let lock = resolver::resolve(&manifest, Some(&existing_lock))?;
 
-    let modules_dir = PathBuf::from("vyauma_modules");
+    let modules_dir = PathBuf::from("vym_modules");
     std::fs::create_dir_all(&modules_dir)
-        .map_err(|e| format!("Failed to create vyauma_modules/: {}", e))?;
+        .map_err(|e| format!("Failed to create vym_modules/: {}", e))?;
 
     // Download each locked package
     for locked in &lock.packages {

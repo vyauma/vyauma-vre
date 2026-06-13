@@ -4,6 +4,7 @@ use crate::ast::{Program, Stmt, Expr, Function, Type, BinaryOperator, Block};
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeError {
     UndefinedVariable(String),
+    ImmutableAssignment(String),
     TypeMismatch { expected: String, found: String },
     UnsupportedOperation(String),
     UndefinedFunction(String),
@@ -20,6 +21,7 @@ impl std::fmt::Display for TypeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeError::UndefinedVariable(name) => write!(f, "Undefined variable: {}", name),
+            TypeError::ImmutableAssignment(name) => write!(f, "Cannot assign to immutable variable: {}", name),
             TypeError::TypeMismatch { expected, found } => write!(f, "Type mismatch: expected {}, found {}", expected, found),
             TypeError::UnsupportedOperation(op) => write!(f, "Unsupported operation: {}", op),
             TypeError::UndefinedFunction(name) => write!(f, "Undefined function: {}", name),
@@ -34,8 +36,14 @@ impl std::fmt::Display for TypeError {
     }
 }
 
+#[derive(Clone)]
+pub struct VariableInfo {
+    pub ty: Type,
+    pub is_mut: bool,
+}
+
 pub struct TypeEnvironment {
-    scopes: Vec<HashMap<String, Type>>,
+    scopes: Vec<HashMap<String, VariableInfo>>,
     functions: HashMap<String, FunctionSignature>,
     pub structs: HashMap<String, HashMap<String, Type>>,
     pub classes: HashMap<String, ClassSignature>,
@@ -72,18 +80,22 @@ impl TypeEnvironment {
         self.scopes.pop();
     }
 
-    pub fn declare_var(&mut self, name: &str, ty: Type) {
+    pub fn declare_var(&mut self, name: &str, ty: Type, is_mut: bool) {
         let last = self.scopes.len() - 1;
-        self.scopes[last].insert(name.to_string(), ty);
+        self.scopes[last].insert(name.to_string(), VariableInfo { ty, is_mut });
     }
 
-    pub fn get_var_type(&self, name: &str) -> Result<Type, TypeError> {
+    pub fn get_var_info(&self, name: &str) -> Result<VariableInfo, TypeError> {
         for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.get(name) {
-                return Ok(ty.clone());
+            if let Some(info) = scope.get(name) {
+                return Ok(info.clone());
             }
         }
         Err(TypeError::UndefinedVariable(name.to_string()))
+    }
+
+    pub fn get_var_type(&self, name: &str) -> Result<Type, TypeError> {
+        self.get_var_info(name).map(|info| info.ty)
     }
     
     pub fn register_function(&mut self, name: &str, params: Vec<Type>, return_type: Type) {
@@ -117,6 +129,20 @@ impl TypeChecker {
     }
 
     pub fn check_program(&mut self, program: &mut Program) -> Result<(), TypeError> {
+        // Register imported modules
+        for import_decl in &program.imports {
+            if let Some(alias) = &import_decl.alias {
+                self.env.declare_var(alias, Type::Any, false);
+            } else {
+                let path = std::path::Path::new(&import_decl.path);
+                if let Some(stem) = path.file_stem() {
+                    if let Some(stem_str) = stem.to_str() {
+                        self.env.declare_var(stem_str, Type::Any, false);
+                    }
+                }
+            }
+        }
+
         // First pass: Register all functions
         for func in &mut program.functions {
             let mut param_types = Vec::new();
@@ -188,7 +214,7 @@ impl TypeChecker {
 
         for param in &func.params {
             let ty = param.1.clone().unwrap_or(Type::Any);
-            self.env.declare_var(&param.0, ty);
+            self.env.declare_var(&param.0, ty, false);
         }
 
         let expected_return_type = func.return_type.clone().unwrap_or(Type::Any);
@@ -222,10 +248,30 @@ impl TypeChecker {
                     }
                     None => expr_type,
                 };
-                self.env.declare_var(name, final_type);
+                self.env.declare_var(name, final_type, false);
+            }
+            Stmt::LetMut(name, type_annotation, expr) => {
+                let expr_type = self.get_expr_type(expr)?;
+                let final_type = match type_annotation {
+                    Some(annotated_ty) => {
+                        if !self.is_compatible(annotated_ty, &expr_type, expr) {
+                            return Err(TypeError::TypeMismatch {
+                                expected: format!("{:?}", annotated_ty),
+                                found: format!("{:?}", expr_type),
+                            });
+                        }
+                        annotated_ty.clone()
+                    }
+                    None => expr_type,
+                };
+                self.env.declare_var(name, final_type, true);
             }
             Stmt::Assign(name, expr) => {
-                let var_type = self.env.get_var_type(name)?;
+                let var_info = self.env.get_var_info(name)?;
+                if !var_info.is_mut {
+                    return Err(TypeError::ImmutableAssignment(name.clone()));
+                }
+                let var_type = var_info.ty;
                 let expr_type = self.get_expr_type(expr)?;
                 if !self.is_compatible(&var_type, &expr_type, expr) {
                     return Err(TypeError::TypeMismatch {
@@ -235,7 +281,9 @@ impl TypeChecker {
                 }
             }
             Stmt::AssignIndex(name, index_expr, rhs_expr) => {
-                let var_ty = self.env.get_var_type(name)?;
+                let var_info = self.env.get_var_info(name)?;
+                // Mutating an element does not reassign the variable itself.
+                let var_ty = var_info.ty;
                 let index_ty = self.get_expr_type(index_expr)?;
                 let rhs_ty = self.get_expr_type(rhs_expr)?;
                 
@@ -275,7 +323,7 @@ impl TypeChecker {
                     Some(expr) => self.get_expr_type(expr)?,
                     None => Type::Any,
                 };
-                if expected_return != &Type::Any && ret_ty != Type::Any && expected_return != &ret_ty {
+                if expected_return != &Type::Any && ret_ty != Type::Any && !self.is_compatible(expected_return, &ret_ty, &Expr::Number(0.0)) {
                     return Err(TypeError::TypeMismatch {
                         expected: format!("{:?}", expected_return),
                         found: format!("{:?}", ret_ty),
@@ -333,9 +381,12 @@ impl TypeChecker {
                 self.env.pop_scope();
             }
             Stmt::TryCatch(try_block, catch_var, catch_block) => {
-                self.check_block(try_block, expected_return)?;
                 self.env.push_scope();
-                self.env.declare_var(catch_var, Type::String); // Defaulting to String for thrown errors
+                self.check_block(try_block, expected_return)?;
+                self.env.pop_scope();
+
+                self.env.push_scope();
+                self.env.declare_var(catch_var, Type::String, false); // Defaulting to String for thrown errors
                 self.check_block(catch_block, expected_return)?;
                 self.env.pop_scope();
             }
@@ -345,6 +396,7 @@ impl TypeChecker {
             }
             Stmt::StructDecl(_, _, _) => {}
             Stmt::AssignProperty(obj_expr, prop_name, rhs) => {
+                // Mutating a property does not reassign the variable itself.
                 let obj_ty = self.get_expr_type(obj_expr)?;
                 let rhs_ty = self.get_expr_type(rhs)?;
                 
@@ -375,7 +427,7 @@ impl TypeChecker {
                                 });
                             }
                         } else {
-                            return Err(TypeError::UnknownProperty(prop_name.clone()));
+                            // Allow dynamic property assignment
                         }
                     } else {
                         return Err(TypeError::UndefinedClass(class_name.clone()));
@@ -429,11 +481,18 @@ impl TypeChecker {
             Expr::Boolean(_) => Ok(Type::Bool),
             Expr::StringLiteral(_) => Ok(Type::String),
             Expr::Identifier(name, ref mut expr_type) => {
-                // "true" and "false" are bools, but handled by lexer usually?
-                // Let's rely on environment for idents
-                let ty = self.env.get_var_type(name)?;
-                *expr_type = Some(ty.clone());
-                Ok(ty)
+                if let Ok(ty) = self.env.get_var_type(name) {
+                    *expr_type = Some(ty.clone());
+                    return Ok(ty);
+                }
+                
+                if let Some(sig) = self.env.functions.get(name) {
+                    let ty = Type::Function(sig.params.clone(), Box::new(sig.return_type.clone()));
+                    *expr_type = Some(ty.clone());
+                    return Ok(ty);
+                }
+                
+                Err(TypeError::UndefinedVariable(name.clone()))
             }
             Expr::BinaryOp(left, op, right, ref mut expr_type) => {
                 let l_ty = self.get_expr_type(left)?;
@@ -489,7 +548,7 @@ impl TypeChecker {
                 }
             }
             Expr::Call(name, args, ref mut expr_type) => {
-                // Simple call check
+                // Check if it's a known function
                 if let Some(sig) = self.env.functions.get(name).cloned() {
                     if sig.params.len() != args.len() {
                         return Err(TypeError::InvalidArguments(format!("Expected {} args, got {}", sig.params.len(), args.len())));
@@ -507,11 +566,29 @@ impl TypeChecker {
                     return Ok(sig.return_type);
                 }
                 
+                // If not in functions but in variables, it's a dynamic call
+                if let Ok(var_info) = self.env.get_var_info(name) {
+                    let mut new_args = std::mem::take(args);
+                    for arg in new_args.iter_mut() {
+                        let _ = self.get_expr_type(arg);
+                    }
+                    *expr = Expr::CallDynamic(Box::new(Expr::Identifier(name.clone(), Some(var_info.ty.clone()))), new_args, Some(Type::Any));
+                    return Ok(Type::Any);
+                }
+                
                 for arg in args.iter_mut() {
                     let _ = self.get_expr_type(arg);
                 }
                 
                 // Allow FFI or built-in calls that we don't know about by returning Any
+                *expr_type = Some(Type::Any);
+                Ok(Type::Any)
+            }
+            Expr::CallDynamic(callee, args, ref mut expr_type) => {
+                let _ = self.get_expr_type(callee)?;
+                for arg in args.iter_mut() {
+                    let _ = self.get_expr_type(arg);
+                }
                 *expr_type = Some(Type::Any);
                 Ok(Type::Any)
             }
@@ -597,7 +674,8 @@ impl TypeChecker {
                             *expr_type = Some(prop_ty.clone());
                             Ok(prop_ty.clone())
                         } else {
-                            Err(TypeError::UnknownProperty(prop_name.clone()))
+                            *expr_type = Some(Type::Any);
+                            Ok(Type::Any)
                         }
                     } else {
                         Err(TypeError::UndefinedClass(c_name))
@@ -737,16 +815,17 @@ impl TypeChecker {
                     Ok(Type::Dict(Box::new(key_ty.unwrap_or(Type::Any)), Box::new(val_ty.unwrap_or(Type::Any))))
                 }
             }
-            Expr::IndexAccess(base_expr, index_expr) => {
+            Expr::IndexAccess(base_expr, index_expr, ref mut expr_type) => {
                 let base_ty = self.get_expr_type(base_expr)?;
                 let index_ty = self.get_expr_type(index_expr)?;
                 
                 match base_ty {
                     Type::Array(elem_ty) => {
                         let is_numeric_literal = matches!(**index_expr, Expr::Number(_));
-                        if !is_numeric_literal && index_ty != Type::Int32 && index_ty != Type::Int64 && index_ty != Type::Any {
-                            return Err(TypeError::InvalidIndexType(format!("Array index must be Int32 or Int64, found {:?}", index_ty)));
+                        if !is_numeric_literal && index_ty != Type::Int32 && index_ty != Type::Int64 && index_ty != Type::Float64 && index_ty != Type::Any {
+                            return Err(TypeError::InvalidIndexType(format!("Array index must be Int32, Int64, or Float64, found {:?}", index_ty)));
                         }
+                        *expr_type = Some(*elem_ty.clone());
                         Ok(*elem_ty)
                     }
                     Type::Dict(k_ty, v_ty) => {
@@ -754,11 +833,35 @@ impl TypeChecker {
                         if !is_numeric_literal && *k_ty != Type::Any && index_ty != Type::Any && *k_ty != index_ty {
                             return Err(TypeError::InvalidIndexType(format!("Dict key expected {:?}, found {:?}", k_ty, index_ty)));
                         }
+                        *expr_type = Some(*v_ty.clone());
                         Ok(*v_ty)
                     }
-                    Type::Any => Ok(Type::Any),
+                    Type::Any => { *expr_type = Some(Type::Any); Ok(Type::Any) },
                     _ => Err(TypeError::UnsupportedOperation(format!("Cannot index into {:?}", base_ty))),
                 }
+            }
+            Expr::Closure { params, return_type, body } => {
+                self.env.push_scope();
+                let mut param_types = Vec::new();
+                for param in params {
+                    let ty = param.1.clone().unwrap_or(Type::Any);
+                    self.env.declare_var(&param.0, ty.clone(), false);
+                    param_types.push(ty);
+                }
+                let ret_ty = return_type.clone().unwrap_or(Type::Any);
+                let mut mutable_body = body.clone();
+                self.check_block(&mut mutable_body, &ret_ty)?;
+                self.env.pop_scope();
+                Ok(Type::Function(param_types, Box::new(ret_ty)))
+            }
+            Expr::NamedCall(_, _, opt_type) => {
+                Ok(opt_type.clone().unwrap_or(Type::Any))
+            }
+            Expr::NamedMethodCall(_, _, _, opt_type) => {
+                Ok(opt_type.clone().unwrap_or(Type::Any))
+            }
+            Expr::NamedNewClass(name, _) => {
+                Ok(Type::Class(name.clone()))
             }
         }
     }
@@ -808,7 +911,7 @@ mod tests {
     fn test_for_loop() {
         let source = r#"
             fn main() {
-                for let i = 0; i < 10; i = i + 1 {
+                for let mut i = 0; i < 10; i = i + 1 {
                     let a: Float64 = i;
                 }
             }
@@ -900,7 +1003,7 @@ mod tests {
     fn test_array_valid() {
         let source = r#"
             fn main() {
-                let a: Array<Int32> = [1, 2, 3];
+                let mut a: Array<Int32> = [1, 2, 3];
                 let b: Int32 = a[0];
                 a[1] = 10;
             }
@@ -922,7 +1025,7 @@ mod tests {
     fn test_dict_valid() {
         let source = r#"
             fn main() {
-                let d: Dict<String, Int32> = { "a": 1, "b": 2 };
+                let mut d: Dict<String, Int32> = { "a": 1, "b": 2 };
                 let val: Int32 = d["a"];
                 d["b"] = 10;
             }

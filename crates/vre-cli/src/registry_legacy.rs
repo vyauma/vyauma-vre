@@ -70,9 +70,9 @@ pub fn install(package_name: Option<&str>) {
         return;
     }
 
-    // Ensure vyauma_modules exists
-    if let Err(e) = fs::create_dir_all("vyauma_modules") {
-        eprintln!("Failed to create vyauma_modules directory: {}", e);
+    // Ensure vym_modules exists
+    if let Err(e) = fs::create_dir_all("vym_modules") {
+        eprintln!("Failed to create vym_modules directory: {}", e);
         return;
     }
 
@@ -91,7 +91,7 @@ pub fn install(package_name: Option<&str>) {
                 println!("(Simulated: registry unreachable. Creating mock package locally...)");
                 
                 // Create mock package structure
-                let pkg_dir = Path::new("vyauma_modules").join(&name);
+                let pkg_dir = Path::new("vym_modules").join(&name);
                 if let Err(e) = fs::create_dir_all(&pkg_dir) {
                     eprintln!("Failed to create package directory {}: {}", pkg_dir.display(), e);
                     continue;

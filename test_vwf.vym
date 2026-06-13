@@ -1,0 +1,14 @@
+import "./packages/vwf/router.vym" as router
+import "./packages/vwf/server.vym" as server
+
+fn main():
+    ffi_console_println("Setting up Router...")
+    let r = router::new_router()
+    r.get("/api/health")
+    r.post("/api/users")
+    
+    ffi_console_println("Starting VWF Server...")
+    let s = server::new_server(8080.0, r)
+    s.start()
+
+

@@ -18,6 +18,8 @@ pub enum TokenKind {
     Throw,
     For,
     Yield,
+    Mut,
+    Trait,
 
     // Identifiers and Literals
     Identifier(String),
@@ -43,6 +45,7 @@ pub enum TokenKind {
     And,
     Or,
     DoubleColon,
+    At,
 
     // Punctuation
     LParen,
@@ -88,6 +91,8 @@ impl TokenKind {
             "throw" => TokenKind::Throw,
             "for" => TokenKind::For,
             "yield" => TokenKind::Yield,
+            "mut" => TokenKind::Mut,
+            "trait" => TokenKind::Trait,
             _ => TokenKind::Identifier(ident.to_string()),
         }
     }
@@ -262,6 +267,7 @@ impl<'a> Lexer<'a> {
                     TokenKind::Colon
                 }
             }
+            Some('@') => TokenKind::At,
             Some('"') => {
                 let kind = self.read_string();
                 return Token { kind, line: start_line, col: start_col };

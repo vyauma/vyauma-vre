@@ -1,0 +1,37 @@
+import "../../stdlib/http.vym" as http
+import "./router.vym" as router
+import "./context.vym" as context
+
+export class Server:
+    port: Float64
+    r: Router
+
+    fn start():
+        let server_fd = net_listen(self.port)
+        ffi_console_println("VWF Server listening on port: " + self.port)
+        
+        while true:
+            let client_fd = net_accept(server_fd)
+            if client_fd >= 0.0:
+                self.handle_client(client_fd)
+
+    fn handle_client(client_fd: Float64):
+        let buf: Array<Float64> = []
+        let mut i = 0.0
+        while i < 1024.0:
+            ffi_array_push(buf, 0.0)
+            i = i + 1.0
+            
+        let bytes_read = read(client_fd, buf)
+        if bytes_read > 0.0:
+            let req_str = bytes_to_string(buf)
+            let raw_req = http::parse_request(req_str)
+            
+            let ctx = context::new_context(client_fd, raw_req)
+            self.r.route(ctx)
+        
+        close(client_fd)
+
+export fn new_server(port: Float64, r: Router) -> Server:
+    let s = new Server(port, r)
+    return s

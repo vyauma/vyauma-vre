@@ -1,0 +1,10 @@
+import "./server.vym" as server
+import "./router.vym" as router
+
+fn main():
+    let r = router::new_router()
+    let s = server::new_server(8080.0, r)
+    s.start()
+
+
+

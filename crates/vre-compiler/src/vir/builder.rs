@@ -87,7 +87,7 @@ impl VirBuilder {
     
     fn build_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Let(name, _type_hint, expr) => {
+            Stmt::Let(name, _type_hint, expr) | Stmt::LetMut(name, _type_hint, expr) => {
                 let val = self.build_expr(expr);
                 self.add_inst(Instruction::StoreVar(name.clone(), val));
             }
@@ -222,18 +222,52 @@ impl VirBuilder {
             Expr::Number(n) => self.add_inst(Instruction::LoadConstNumber(*n)),
             Expr::Boolean(b) => self.add_inst(Instruction::LoadConstBool(*b)),
             Expr::StringLiteral(s) => self.add_inst(Instruction::LoadConstString(s.clone())),
-            Expr::Identifier(name, _) => self.add_inst(Instruction::LoadVar(name.clone())),
-            Expr::BinaryOp(left, op, right, _) => {
+            Expr::Identifier(name, ty) => {
+                if let Some(crate::ast::Type::Function(_, _)) = ty {
+                    self.add_inst(Instruction::NewClosure(name.clone(), vec![]))
+                } else {
+                    self.add_inst(Instruction::LoadVar(name.clone()))
+                }
+            }
+            Expr::BinaryOp(left, op, right, opt_ty) => {
                 let l = self.build_expr(left);
                 let r = self.build_expr(right);
+                
+                let left_ty = match &**left {
+                    Expr::StringLiteral(_) => crate::ast::Type::String,
+                    Expr::Boolean(_) => crate::ast::Type::Bool,
+                    Expr::Identifier(_, t) | Expr::BinaryOp(_, _, _, t) | Expr::Call(_, _, t) | Expr::MethodCall(_, _, _, t) | Expr::PropertyAccess(_, _, t) | Expr::NamedCall(_, _, t) | Expr::NamedMethodCall(_, _, _, t) | Expr::IndexAccess(_, _, t) => t.clone().unwrap_or(crate::ast::Type::Float64),
+                    _ => crate::ast::Type::Float64,
+                };
+                let math_ty = opt_ty.clone().unwrap_or(crate::ast::Type::Float64);
+                let cmp_ty = if left_ty == crate::ast::Type::Any { crate::ast::Type::Float64 } else { left_ty };
+                
                 match op {
-                    ast::BinaryOperator::Add => self.add_inst(Instruction::Add(l, r)),
+                    ast::BinaryOperator::Add => {
+                        if math_ty == crate::ast::Type::String {
+                            self.add_inst(Instruction::AddStr(l, r))
+                        } else {
+                            self.add_inst(Instruction::Add(l, r))
+                        }
+                    },
                     ast::BinaryOperator::Subtract => self.add_inst(Instruction::Sub(l, r)),
                     ast::BinaryOperator::Multiply => self.add_inst(Instruction::Mul(l, r)),
                     ast::BinaryOperator::Divide => self.add_inst(Instruction::Div(l, r)),
 
-                    ast::BinaryOperator::Equals => self.add_inst(Instruction::Eq(l, r)),
-                    ast::BinaryOperator::NotEquals => self.add_inst(Instruction::NotEq(l, r)),
+                    ast::BinaryOperator::Equals => {
+                        if cmp_ty == crate::ast::Type::String {
+                            self.add_inst(Instruction::EqStr(l, r))
+                        } else {
+                            self.add_inst(Instruction::Eq(l, r))
+                        }
+                    },
+                    ast::BinaryOperator::NotEquals => {
+                        if cmp_ty == crate::ast::Type::String {
+                            self.add_inst(Instruction::NotEqStr(l, r))
+                        } else {
+                            self.add_inst(Instruction::NotEq(l, r))
+                        }
+                    },
                     ast::BinaryOperator::LessThan => self.add_inst(Instruction::Lt(l, r)),
                     ast::BinaryOperator::LessThanOrEq => self.add_inst(Instruction::Lte(l, r)),
                     ast::BinaryOperator::GreaterThan => self.add_inst(Instruction::Gt(l, r)),
@@ -244,7 +278,39 @@ impl VirBuilder {
             }
             Expr::Call(name, args, _) => {
                 let arg_vals: Vec<Value> = args.iter().map(|a| self.build_expr(a)).collect();
-                self.add_inst(Instruction::Call(name.clone(), arg_vals))
+                let syscall_code = match name.as_str() {
+                    "print" => Some(0x01),
+                    "read_char" => Some(0x02),
+                    "read" => Some(0x03),
+                    "write" => Some(0x04),
+                    "close" => Some(0x05),
+                    "file_open" => Some(0x10),
+                    "sleep" => Some(0x06),
+                    "sleep_async" => Some(0x08),
+                    "gc" => Some(0x07),
+                    "net_connect" => Some(0x20),
+                    "net_listen" => Some(0x21),
+                    "net_accept" => Some(0x22),
+                    "net_set_nonblocking" => Some(0x23),
+                    "net_poll" => Some(0x24),
+                    "net_read" => Some(0x25),
+                    "net_write" => Some(0x26),
+                    "net_close" => Some(0x27),
+                    "string_to_bytes" => Some(0x30),
+                    "bytes_to_string" => Some(0x31),
+                    _ => None,
+                };
+                
+                if let Some(code) = syscall_code {
+                    self.add_inst(Instruction::Syscall(code, arg_vals))
+                } else {
+                    self.add_inst(Instruction::Call(name.clone(), arg_vals))
+                }
+            }
+            Expr::CallDynamic(callee, args, _) => {
+                let callee_val = self.build_expr(callee);
+                let arg_vals: Vec<Value> = args.iter().map(|a| self.build_expr(a)).collect();
+                self.add_inst(Instruction::CallDynamic(callee_val, arg_vals))
             }
             Expr::MethodCall(obj, name, args, _) => {
                 let obj_val = self.build_expr(obj);
@@ -267,7 +333,7 @@ impl VirBuilder {
                 let arg_vals: Vec<Value> = args.iter().map(|a| self.build_expr(a)).collect();
                 self.add_inst(Instruction::NewClass(name.clone(), arg_vals))
             }
-            Expr::IndexAccess(arr, idx) => {
+            Expr::IndexAccess(arr, idx, _) => {
                 let arr_val = self.build_expr(arr);
                 let idx_val = self.build_expr(idx);
                 self.add_inst(Instruction::IndexAccess(arr_val, idx_val))
@@ -275,6 +341,27 @@ impl VirBuilder {
             Expr::PropertyAccess(obj, prop, _) => {
                 let obj_val = self.build_expr(obj);
                 self.add_inst(Instruction::PropertyAccess(obj_val, prop.clone()))
+            }
+            Expr::NamedCall(name, args, _) => {
+                let arg_vals: Vec<Value> = args.iter().map(|a| self.build_expr(&a.value)).collect();
+                self.add_inst(Instruction::Call(name.clone(), arg_vals))
+            }
+            Expr::NamedMethodCall(obj, name, args, _) => {
+                let obj_val = self.build_expr(obj);
+                let arg_vals: Vec<Value> = args.iter().map(|a| self.build_expr(&a.value)).collect();
+                self.add_inst(Instruction::MethodCall(obj_val, name.clone(), arg_vals))
+            }
+            Expr::NamedNewClass(name, args) => {
+                let arg_vals: Vec<Value> = args.iter().map(|a| self.build_expr(&a.value)).collect();
+                self.add_inst(Instruction::NewClass(name.clone(), arg_vals))
+            }
+            Expr::Closure { .. } => {
+                // TODO: Implement lambda lifting.
+                // A closure requires taking the block, generating a separate VirBuilder::build_function pass, 
+                // injecting it into the Module, and then emitting a NewClosure(func_name, captured_vars) instruction.
+                // For now, we will emit a placeholder.
+                let captured_vars = vec![];
+                self.add_inst(Instruction::NewClosure("anon_closure".to_string(), captured_vars))
             }
         }
     }

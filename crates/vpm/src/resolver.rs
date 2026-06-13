@@ -14,7 +14,7 @@ use crate::manifest::Manifest;
 use crate::registry;
 
 /// Resolve all dependencies declared in `manifest` and return a complete lockfile.
-pub fn resolve(manifest: &Manifest) -> Result<LockFile, String> {
+pub fn resolve(manifest: &Manifest, existing_lock: Option<&LockFile>) -> Result<LockFile, String> {
     let mut lock = LockFile::default();
     let mut visited: HashSet<String> = HashSet::new();
 
@@ -23,7 +23,7 @@ pub fn resolve(manifest: &Manifest) -> Result<LockFile, String> {
     all_deps.extend(manifest.dev_dependencies.clone());
 
     for (name, version_req) in &all_deps {
-        resolve_package(name, version_req, &mut lock, &mut visited)?;
+        resolve_package(name, version_req, &mut lock, existing_lock, &mut visited)?;
     }
 
     Ok(lock)
@@ -33,6 +33,7 @@ fn resolve_package(
     name: &str,
     version_req: &str,
     lock: &mut LockFile,
+    existing_lock: Option<&LockFile>,
     visited: &mut HashSet<String>,
 ) -> Result<(), String> {
     if visited.contains(name) {
@@ -42,14 +43,33 @@ fn resolve_package(
 
     println!("  Resolving {}@{}...", name, version_req);
 
-    // Fetch available versions from the registry
-    let resolved_version = match registry::fetch_versions(name) {
-        Ok(versions) => {
-            // Try to match the version requirement (simple best-match heuristic)
-            select_version(&versions, version_req)
-                .ok_or_else(|| format!("No version of '{}' satisfies '{}'", name, version_req))?
+    // If we have it in the lockfile and it satisfies the requirement, use the locked version
+    let mut use_locked = None;
+    if let Some(existing) = existing_lock {
+        if let Some(locked_pkg) = existing.find(name) {
+            if satisfies_version(&locked_pkg.version, version_req) {
+                use_locked = Some(locked_pkg.clone());
+            }
         }
-        Err(e) => {
+    }
+
+    let resolved_version = if let Some(locked_pkg) = use_locked {
+        println!("  Using locked version {}@{}", name, locked_pkg.version);
+        // We still need to populate transitive deps, so we return early and just insert it to our new lockfile
+        lock.upsert(locked_pkg.clone());
+        for dep_name in &locked_pkg.dependencies {
+            // We don't have the version reqs of the transitive deps here without hitting registry,
+            // but we can assume they are in the existing lockfile. We just resolve them with "*"
+            resolve_package(dep_name, "*", lock, existing_lock, visited)?;
+        }
+        return Ok(());
+    } else {
+        match registry::fetch_versions(name) {
+            Ok(versions) => {
+                select_version(&versions, version_req)
+                    .ok_or_else(|| format!("No version of '{}' satisfies '{}'", name, version_req))?
+            }
+            Err(e) => {
             // Registry offline — use the version_req verbatim as a best-effort version
             eprintln!(
                 "  Warning: registry unreachable ({}) — using '{}' as declared version for '{}'",
@@ -59,6 +79,7 @@ fn resolve_package(
                 .trim_start_matches('~')
                 .trim_start_matches(">=")
                 .to_string()
+            }
         }
     };
 
@@ -74,7 +95,7 @@ fn resolve_package(
     // Recursively resolve transitive dependencies
     let dep_names: Vec<String> = if let Some(ref meta) = pkg_meta {
         for dep in &meta.dependencies {
-            resolve_package(&dep.name, &dep.version_req, lock, visited)?;
+            resolve_package(&dep.name, &dep.version_req, lock, existing_lock, visited)?;
         }
         meta.dependencies.iter().map(|d| d.name.clone()).collect()
     } else {
@@ -137,4 +158,39 @@ fn select_version(versions: &[String], req: &str) -> Option<String> {
 
     candidates.sort_unstable();
     candidates.last().map(|(ma, mi, pa)| format!("{}.{}.{}", ma, mi, pa))
+}
+
+fn satisfies_version(version: &str, req: &str) -> bool {
+    let (op, ver_str) = if let Some(v) = req.strip_prefix('^') {
+        ("^", v)
+    } else if let Some(v) = req.strip_prefix('~') {
+        ("~", v)
+    } else if let Some(v) = req.strip_prefix(">=") {
+        (">=", v)
+    } else {
+        ("=", req)
+    };
+
+    if req == "*" { return true; }
+
+    let parts: Vec<u64> = ver_str.split('.').filter_map(|p| p.parse().ok()).collect();
+    let (major, minor, patch) = (
+        parts.get(0).copied().unwrap_or(0),
+        parts.get(1).copied().unwrap_or(0),
+        parts.get(2).copied().unwrap_or(0),
+    );
+
+    let ps: Vec<u64> = version.split('.').filter_map(|p| p.parse().ok()).collect();
+    let (ma, mi, pa) = (
+        *ps.get(0).unwrap_or(&0),
+        *ps.get(1).unwrap_or(&0),
+        *ps.get(2).unwrap_or(&0),
+    );
+
+    match op {
+        "^"  => ma == major && (ma > 0 || (mi > minor || (mi == minor && pa >= patch))),
+        "~"  => ma == major && mi == minor && pa >= patch,
+        ">=" => (ma, mi, pa) >= (major, minor, patch),
+        _    => ma == major && mi == minor && pa == patch,
+    }
 }

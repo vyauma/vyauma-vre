@@ -17,6 +17,7 @@ pub enum TypeMetadata {
     Dict,
     Struct(String),
     Class(String),
+    Function(Vec<TypeMetadata>, Box<TypeMetadata>),
 }
 
 impl From<&Type> for TypeMetadata {
@@ -33,6 +34,11 @@ impl From<&Type> for TypeMetadata {
             Type::Dict(_, _) => TypeMetadata::Dict,
             Type::Struct(name) => TypeMetadata::Struct(name.clone()),
             Type::Class(name) => TypeMetadata::Class(name.clone()),
+            Type::Function(params, ret) => {
+                let p_meta = params.iter().map(|p| TypeMetadata::from(p)).collect();
+                let r_meta = Box::new(TypeMetadata::from(&**ret));
+                TypeMetadata::Function(p_meta, r_meta)
+            }
         }
     }
 }
@@ -48,13 +54,16 @@ pub enum Instruction {
     LoadNull,
     
     Add(Value, Value),
+    AddStr(Value, Value),
     Sub(Value, Value),
     Mul(Value, Value),
     Div(Value, Value),
     Rem(Value, Value),
     
     Eq(Value, Value),
+    EqStr(Value, Value),
     NotEq(Value, Value),
+    NotEqStr(Value, Value),
     Lt(Value, Value),
     Lte(Value, Value),
     Gt(Value, Value),
@@ -91,6 +100,7 @@ pub enum Instruction {
     
     Return(Option<Value>),
     Throw(Value),
+    Syscall(u8, Vec<Value>),
     
     SetupTry(BlockId),
     PopTry,

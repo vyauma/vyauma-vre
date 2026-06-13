@@ -1,0 +1,11 @@
+import "../../stdlib/db.vym" as db
+
+export class MigrationRunner:
+    conn: Database
+
+    fn run(migration_sql: String) -> Bool:
+        let res = self.conn.execute(migration_sql, [])
+        return res >= 0
+
+export fn new_runner(connection: Any) -> MigrationRunner:
+    return new MigrationRunner(connection)

@@ -1,23 +1,19 @@
-fn fs_exists(path) {
-    return ffi_fs_exists(path);
-}
+// File System Module
 
-fn fs_delete(path) {
-    return ffi_fs_delete(path);
-}
+export fn exists(path: String) -> Bool:
+    return ffi_fs_exists(path)
 
-fn fs_size(path) {
-    return ffi_fs_size(path);
-}
+export fn delete(path: String) -> Bool:
+    return ffi_fs_delete(path)
 
-fn fs_read_file(path) {
-    return ffi_fs_read_file(path);
-}
+export fn size(path: String) -> Float64:
+    return ffi_fs_size(path)
 
-fn fs_write_file(path, content) {
-    return ffi_fs_write_file(path, content);
-}
+export fn read(path: String) -> String:
+    return ffi_fs_read_file(path)
 
-fn fs_append_file(path, content) {
-    return ffi_fs_append_file(path, content);
-}
+export fn write(path: String, content: String) -> Bool:
+    return ffi_fs_write_file(path, content)
+
+export fn append(path: String, content: String) -> Bool:
+    return ffi_fs_append_file(path, content)

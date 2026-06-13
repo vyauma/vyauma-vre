@@ -1,11 +1,7 @@
-// Vyauma JSON Standard Library Module
+// JSON Module
 
-// Parses a JSON string into Vyauma Objects (Dictionaries, Arrays, Primitives)
-fn json_parse(json_str) {
-    return ffi_json_parse(json_str);
-}
+export fn decode(json_str: String) -> Any:
+    return ffi_json_parse(json_str)
 
-// Stringifies a Vyauma Object into a JSON string
-fn json_stringify(obj) {
-    return ffi_json_stringify(obj);
-}
+export fn encode(obj: Any) -> String:
+    return ffi_json_stringify(obj)

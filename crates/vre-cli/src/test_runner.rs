@@ -65,7 +65,8 @@ pub fn run_tests(path_str: &str) {
 
     // Tests run the top-level script which should contain assertions.
     // If any assertion fails, it triggers a VRE runtime error.
-    match vm.execute() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    match rt.block_on(vm.execute()) {
         Ok(_) => {
             println!("\n✅ All tests passed in {}.", path_str);
         }

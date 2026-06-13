@@ -1,0 +1,12 @@
+[package]
+name = "vfmt"
+version = "0.1.0"
+edition = "2021"
+description = "Vyauma Code Formatter"
+
+[[bin]]
+name = "vfmt"
+path = "src/main.rs"
+
+[dependencies]
+vre-compiler = { path = "../vre-compiler" }

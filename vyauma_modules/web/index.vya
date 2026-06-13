@@ -1,0 +1,113 @@
+// Vyauma Web Framework (VWF) Core Module
+// Provides Express.js-style routing and asynchronous HTTP serving
+
+class Response {
+    fn init(fd) {
+        self.fd = fd;
+        self.headers_sent = false;
+    }
+
+    fn json(data) {
+        let payload = ffi_json_stringify(data);
+        let http_resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + ffi_string_len(payload) + "\r\n\r\n" + payload;
+        net_write(self.fd, http_resp);
+    }
+
+    fn send(text) {
+        let http_resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + ffi_string_len(text) + "\r\n\r\n" + text;
+        net_write(self.fd, http_resp);
+    }
+}
+
+class Request {
+    fn init(method, path, body) {
+        self.method = method;
+        self.path = path;
+        self.body = body;
+    }
+}
+
+class App {
+    fn init() {
+        self.routes_get = {};
+        self.routes_post = {};
+    }
+
+    fn get(path, handler) {
+        let rg = self.routes_get;
+        rg[path] = handler;
+    }
+
+    fn post(path, handler) {
+        let rp = self.routes_post;
+        rp[path] = handler;
+    }
+
+    fn listen(port) {
+        ffi_console_println("VWF Server listening on port " + port);
+        let server_fd = net_listen(port);
+        
+        while true {
+            let fds = net_poll();
+            let mut i = 0;
+            while i < ffi_array_len(fds) {
+                let fd = ffi_array_get(fds, i);
+                if fd == server_fd {
+                    let client_fd = net_accept(server_fd);
+                    if client_fd != 0 - 1 {
+                        // In a real implementation we would spawn a green thread here.
+                        // For now we process it sequentially on the main event loop.
+                        self.handle_connection(client_fd);
+                    }
+                } else {
+                    self.handle_connection(fd);
+                }
+                i = i + 1;
+            }
+        }
+    }
+
+    fn handle_connection(client_fd) {
+        let req_str: String = net_read(client_fd, 4096);
+        let wouldblock: String = "[WOULDBLOCK]";
+        if req_str == wouldblock {
+            return 0; // Return early, don't close connection
+        }
+        if ffi_string_len(req_str) > 0 {
+            // Very naive HTTP parsing
+            let lines = ffi_string_split(req_str, "\r\n");
+            let first_line: String = ffi_array_get(lines, 0);
+            let parts = ffi_string_split(first_line, " ");
+            
+            let method: String = ffi_array_get(parts, 0);
+            let path: String = ffi_array_get(parts, 1);
+            
+            let req = new Request();
+            req.init(method, path, "");
+            let res = new Response();
+            res.init(client_fd);
+            
+            if method == "GET" {
+                if ffi_dict_has(self.routes_get, path) {
+                    let handler = self.routes_get[path];
+                    handler(req, res);
+                } else {
+                    res.send("404 Not Found");
+                }
+            } else {
+                if method == "POST" {
+                    if ffi_dict_has(self.routes_post, path) {
+                        let rp = self.routes_post;
+                        let handler = rp[path];
+                        handler(req, res);
+                    } else {
+                        res.send("404 Not Found");
+                    }
+                } else {
+                    res.send("404 Not Found");
+                }
+            }
+        }
+        net_close(client_fd);
+    }
+}

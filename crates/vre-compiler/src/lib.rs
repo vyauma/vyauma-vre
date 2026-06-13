@@ -51,8 +51,10 @@ pub fn compile(source: &str, path_str: &str, base_path: Option<&Path>) -> Result
     let mut optimizer = optimizer::AstOptimizer::new();
     optimizer.optimize(&mut program);
     
-    let compiler = Compiler::new();
-    let compiled = compiler.compile(program)?;
+    // Vyauma Language v2 Pipeline: AST -> VIR -> Bytecode
+    let module = vir::builder::VirBuilder::build_module(&program);
+    let codegen = vir::codegen::VirCodegen::new();
+    let compiled = codegen.generate(module)?;
     
     Ok(compiled)
 }
@@ -185,11 +187,16 @@ fn mangle_program(program: &mut Program, namespace: &str) {
             mangle_stmt(stmt, namespace, &local_fns);
         }
     }
+    
+    for class_stmt in &mut program.classes {
+        mangle_stmt(class_stmt, namespace, &local_fns);
+    }
 }
 
 fn mangle_stmt(stmt: &mut Stmt, namespace: &str, local_fns: &std::collections::HashMap<String, bool>) {
     match stmt {
         Stmt::Let(_, _, expr) => mangle_expr(expr, namespace, local_fns),
+        Stmt::LetMut(_, _, expr) => mangle_expr(expr, namespace, local_fns),
         Stmt::Assign(_, expr) => mangle_expr(expr, namespace, local_fns),
         Stmt::AssignIndex(_, idx, val) => {
             mangle_expr(idx, namespace, local_fns);
@@ -235,20 +242,42 @@ fn mangle_stmt(stmt: &mut Stmt, namespace: &str, local_fns: &std::collections::H
                 mangle_stmt(s, namespace, local_fns);
             }
         }
-        Stmt::Return(None) | Stmt::StructDecl(..) | Stmt::ClassDecl(..) | Stmt::Yield => {}
+        Stmt::ClassDecl(name, _, methods, _) => {
+            for method in methods {
+                for s in &mut method.body {
+                    if namespace == "server" {
+                        println!("Mangling method {} in class {}", method.name, name);
+                    }
+                    mangle_stmt(s, namespace, local_fns);
+                }
+            }
+        }
+        Stmt::Return(None) | Stmt::StructDecl(..) | Stmt::Yield => {}
     }
 }
 
 fn mangle_expr(expr: &mut Expr, namespace: &str, local_fns: &std::collections::HashMap<String, bool>) {
     match expr {
         Expr::Call(name, args, _) => {
+            if namespace == "server" {
+                println!("Mangling call {}", name);
+            }
             if let Some(&is_exported) = local_fns.get(name) {
                 if is_exported {
                     *name = format!("{}__{}", namespace, name);
                 } else {
                     *name = format!("__private_{}__{}", namespace, name);
                 }
+                if namespace == "server" {
+                    println!("  -> renamed to {}", name);
+                }
             }
+            for arg in args {
+                mangle_expr(arg, namespace, local_fns);
+            }
+        }
+        Expr::CallDynamic(callee, args, _) => {
+            mangle_expr(callee, namespace, local_fns);
             for arg in args {
                 mangle_expr(arg, namespace, local_fns);
             }
@@ -268,7 +297,7 @@ fn mangle_expr(expr: &mut Expr, namespace: &str, local_fns: &std::collections::H
                 mangle_expr(v, namespace, local_fns);
             }
         }
-        Expr::IndexAccess(arr, idx) => {
+        Expr::IndexAccess(arr, idx, _) => {
             mangle_expr(arr, namespace, local_fns);
             mangle_expr(idx, namespace, local_fns);
         }
@@ -287,6 +316,34 @@ fn mangle_expr(expr: &mut Expr, namespace: &str, local_fns: &std::collections::H
         Expr::NewClass(_, args) => {
             for a in args {
                 mangle_expr(a, namespace, local_fns);
+            }
+        }
+        Expr::NamedCall(name, args, _) => {
+            if let Some(&is_exported) = local_fns.get(name) {
+                if is_exported {
+                    *name = format!("{}__{}", namespace, name);
+                } else {
+                    *name = format!("__private_{}__{}", namespace, name);
+                }
+            }
+            for a in args {
+                mangle_expr(&mut a.value, namespace, local_fns);
+            }
+        }
+        Expr::NamedMethodCall(obj, _, args, _) => {
+            mangle_expr(obj, namespace, local_fns);
+            for a in args {
+                mangle_expr(&mut a.value, namespace, local_fns);
+            }
+        }
+        Expr::NamedNewClass(_, args) => {
+            for a in args {
+                mangle_expr(&mut a.value, namespace, local_fns);
+            }
+        }
+        Expr::Closure { params: _, body, return_type: _ } => {
+            for s in body {
+                mangle_stmt(s, namespace, local_fns);
             }
         }
         Expr::Number(_) | Expr::Boolean(_) | Expr::StringLiteral(_) | Expr::Identifier(_, _) => {}

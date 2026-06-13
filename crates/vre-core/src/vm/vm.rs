@@ -17,8 +17,8 @@ use crate::module::ModuleCache;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::fs::File;
-use mio::{Events, Poll, Token, Interest};
-use mio::net::{TcpStream, TcpListener};
+use tokio::net::{TcpStream, TcpListener};
+// No need for AsyncReadExt/AsyncWriteExt since we use try_read/try_write
 use std::net::SocketAddr;
 
 /// A compiled module ready to be loaded into a child VM.
@@ -95,8 +95,6 @@ pub struct VirtualMachine {
     next_fd: usize,
     pub native_functions: Vec<crate::config::FfiBinding>,
     pub native_names: Vec<String>,
-    poll: Poll,
-    events: Events,
     
     exception_handlers: Vec<ExceptionHandler>,
 
@@ -139,10 +137,6 @@ impl VirtualMachine {
                 return Err(format!("Unresolved FFI native import: {}", import));
             }
         }
-
-        let poll = Poll::new().map_err(|e| format!("Failed to create mio Poll: {}", e))?;
-        let _events = Events::with_capacity(1024);
-
         let max_stack_size = config.max_stack_size;
 
         Ok(VirtualMachine {
@@ -162,8 +156,6 @@ impl VirtualMachine {
             next_fd: 0,
             native_functions,
             native_names,
-            poll,
-            events: _events,
             exception_handlers: Vec::new(),
             jit_cache: HashMap::new(),
             jit_call_counts: HashMap::new(),
@@ -180,17 +172,25 @@ impl VirtualMachine {
     }
 
     /// Execute bytecode until halt or error
-    pub fn execute(&mut self) -> VreResult<()> {
+    pub async fn execute(&mut self) -> VreResult<()> {
         let mut next_gc_threshold = 1024;
+        let mut yield_counter = 0;
         while !self.halted {
+            yield_counter += 1;
+            if yield_counter > 1000 {
+                tokio::task::yield_now().await;
+                yield_counter = 0;
+            }
+
             self.scheduler.check_timers();
 
             if self.current_task_id == u64::MAX {
                 if !self.resume_next_task() {
                     if self.scheduler.has_active_tasks() {
-                        let timeout = self.scheduler.next_timer_timeout();
-                        if let Err(e) = self.poll.poll(&mut self.events, timeout) {
-                            return Err(VreError::NativeFunctionError(e.to_string()));
+                        if let Some(timeout) = self.scheduler.next_timer_timeout() {
+                            tokio::time::sleep(timeout).await;
+                        } else {
+                            tokio::task::yield_now().await;
                         }
                         self.scheduler.check_timers();
                         continue;
@@ -202,7 +202,7 @@ impl VirtualMachine {
 
             if self.ip >= self.instructions.len() { break; }
 
-            if let Err(err) = self.step() {
+            if let Err(err) = self.step().await {
                 if self.exception_handlers.is_empty() {
                     return Err(err);
                 } else {
@@ -260,14 +260,20 @@ impl VirtualMachine {
     }
 
     /// Execute a single instruction (public for tests)
-    pub fn step(&mut self) -> VreResult<()> {
+    pub async fn step(&mut self) -> VreResult<()> {
         let op = self.read_u8()?;
-        self.execute_instruction(op)
+        self.execute_instruction(op).await
     }
 
-    fn execute_instruction(&mut self, op: u8) -> VreResult<()> {
+    async fn execute_instruction(&mut self, op: u8) -> VreResult<()> {
         let opcode = OpCode::from_u8(op)
-            .ok_or(VreError::InvalidOpcode(op))?;
+            .ok_or_else(|| {
+                println!("Invalid opcode: {:#04x} at IP: {}", op, self.ip - 1);
+                let start = (self.ip as isize - 10).max(0) as usize;
+                let end = (self.ip + 10).min(self.instructions.len());
+                println!("Surrounding bytes: {:?}", &self.instructions[start..end]);
+                VreError::InvalidOpcode(op)
+            })?;
 
         match opcode {
             // ── System ─────────────────────────────────────────────────────
@@ -402,25 +408,46 @@ impl VirtualMachine {
                 let b = self.stack.pop().unwrap();
                 let a = self.stack.pop().unwrap();
                 
-                let a_str = match a {
-                    Value::String(s) => s,
-                    Value::Float64(n) => n.to_string(),
-                    Value::Float32(n) => n.to_string(),
-                    Value::Int64(n) => n.to_string(),
-                    Value::Int32(n) => n.to_string(),
-                    Value::Bool(b) => b.to_string(),
-                    Value::Null => "null".to_string(),
-                    _ => format!("{:?}", a),
+                let mut a_str = String::new();
+                match a {
+                    Value::String(s) => a_str = s,
+                    Value::Float64(n) => a_str = n.to_string(),
+                    Value::Float32(n) => a_str = n.to_string(),
+                    Value::Int64(n) => a_str = n.to_string(),
+                    Value::Int32(n) => a_str = n.to_string(),
+                    Value::Bool(b) => a_str = b.to_string(),
+                    Value::Null => a_str = "null".to_string(),
+                    Value::Reference(id) => {
+                        if let Ok(obj) = self.heap.get(id) {
+                            if let HeapObject::String(s) = obj {
+                                a_str = s.clone();
+                            } else {
+                                a_str = format!("{:?}", Value::Reference(id));
+                            }
+                        }
+                    }
+                    _ => a_str = format!("{:?}", a),
                 };
-                let b_str = match b {
-                    Value::String(s) => s,
-                    Value::Float64(n) => n.to_string(),
-                    Value::Float32(n) => n.to_string(),
-                    Value::Int64(n) => n.to_string(),
-                    Value::Int32(n) => n.to_string(),
-                    Value::Bool(b) => b.to_string(),
-                    Value::Null => "null".to_string(),
-                    _ => format!("{:?}", b),
+                
+                let mut b_str = String::new();
+                match b {
+                    Value::String(s) => b_str = s,
+                    Value::Float64(n) => b_str = n.to_string(),
+                    Value::Float32(n) => b_str = n.to_string(),
+                    Value::Int64(n) => b_str = n.to_string(),
+                    Value::Int32(n) => b_str = n.to_string(),
+                    Value::Bool(b) => b_str = b.to_string(),
+                    Value::Null => b_str = "null".to_string(),
+                    Value::Reference(id) => {
+                        if let Ok(obj) = self.heap.get(id) {
+                            if let HeapObject::String(s) = obj {
+                                b_str = s.clone();
+                            } else {
+                                b_str = format!("{:?}", Value::Reference(id));
+                            }
+                        }
+                    }
+                    _ => b_str = format!("{:?}", b),
                 };
                 self.stack.push(Value::String(format!("{}{}", a_str, b_str)))
             }
@@ -430,7 +457,7 @@ impl VirtualMachine {
                 if let (Value::Bool(ba), Value::Bool(bb)) = (a, b) {
                     self.stack.push(Value::Bool(ba && bb))
                 } else {
-                    Err(VreError::TypeMismatch)
+                    panic!("TypeMismatch at {}", line!())
                 }
             }
             OpCode::OrBool => {
@@ -439,7 +466,25 @@ impl VirtualMachine {
                 if let (Value::Bool(ba), Value::Bool(bb)) = (a, b) {
                     self.stack.push(Value::Bool(ba || bb))
                 } else {
-                    Err(VreError::TypeMismatch)
+                    panic!("TypeMismatch at {}", line!())
+                }
+            }
+            OpCode::EqualBool => {
+                let b = self.stack.pop().unwrap();
+                let a = self.stack.pop().unwrap();
+                if let (Value::Bool(ba), Value::Bool(bb)) = (a, b) {
+                    self.stack.push(Value::Bool(ba == bb))
+                } else {
+                    panic!("TypeMismatch at {}", line!())
+                }
+            }
+            OpCode::NotEqualBool => {
+                let b = self.stack.pop().unwrap();
+                let a = self.stack.pop().unwrap();
+                if let (Value::Bool(ba), Value::Bool(bb)) = (a, b) {
+                    self.stack.push(Value::Bool(ba != bb))
+                } else {
+                    panic!("TypeMismatch at {}", line!())
                 }
             }
 
@@ -579,7 +624,7 @@ impl VirtualMachine {
                     Value::Reference(id) => {
                         match self.heap.get(id)? {
                             HeapObject::Closure(ip, _) => (*ip, Some(id)),
-                            _ => return Err(VreError::TypeMismatch),
+                            _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                         }
                     }
                     Value::Int64(ip)   => (ip as usize, None),
@@ -614,7 +659,7 @@ impl VirtualMachine {
                     Value::Int64(id) => id as u64,
                     Value::Int32(id) => id as u64,
                     Value::Float64(id) => id as u64,
-                    _ => return Err(VreError::TypeMismatch),
+                    _ => return panic!("TypeMismatch at {}", line!()),
                 };
                 
                 let task = Task {
@@ -634,17 +679,23 @@ impl VirtualMachine {
             }
 
             OpCode::CallDynamic => {
+                let _arg_count = self.read_u16()? as usize;
                 let local_count = self.read_u16()? as usize;
-                // Ignore the 3 bytes of padding from the 6-byte Call operand space
-                self.ip += 3;
-                let target_val = self.stack.pop()?;
+                let stack_len = self.stack.size();
+                if stack_len <= _arg_count {
+                    return Err(VreError::StackUnderflow);
+                }
+                let target_val = self.stack.remove(stack_len - _arg_count - 1);
                 let closure_id = match target_val {
                     Value::Reference(id) => id,
-                    _ => return Err(VreError::TypeMismatch),
+                    _ => return panic!("TypeMismatch at {}", line!()),
                 };
                 let target_ip = match self.heap.get(closure_id)? {
                     HeapObject::Closure(ip, _) => *ip,
-                    _ => return Err(VreError::TypeMismatch),
+                    other => {
+                        println!("TypeMismatch in CallDynamic: expected Closure, got {:?}", other);
+                        return panic!("TypeMismatch at {}", line!());
+                    }
                 };
                 let frame = CallFrame {
                     return_ip: self.ip,
@@ -658,12 +709,12 @@ impl VirtualMachine {
 
             OpCode::NewClosure => {
                 let target = self.read_u32()? as usize;
-                let upvalue_count = self.read_u8()? as usize;
+                let upvalue_count = self.read_u16()? as usize;
                 let mut upvalues = Vec::new();
                 for _ in 0..upvalue_count {
                     let heap_id = match self.stack.pop()? {
                         Value::Reference(id) => id,
-                        _ => return Err(VreError::TypeMismatch),
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                     };
                     upvalues.push(heap_id);
                 }
@@ -680,8 +731,8 @@ impl VirtualMachine {
                     let box_id = upvalues[index];
                     if let HeapObject::Box(val) = self.heap.get(box_id)? {
                         self.stack.push(val.clone())?;
-                    } else { return Err(VreError::TypeMismatch); }
-                } else { return Err(VreError::TypeMismatch); }
+                    } else { return panic!("TypeMismatch at {}", line!()); }
+                } else { return panic!("TypeMismatch at {}", line!()); }
                 Ok(())
             }
 
@@ -693,8 +744,8 @@ impl VirtualMachine {
                     let box_id = upvalues[index];
                     if let HeapObject::Box(ref mut box_val) = self.heap.get_mut(box_id)? {
                         *box_val = val;
-                    } else { return Err(VreError::TypeMismatch); }
-                } else { return Err(VreError::TypeMismatch); }
+                    } else { return panic!("TypeMismatch at {}", line!()); }
+                } else { return panic!("TypeMismatch at {}", line!()); }
                 Ok(())
             }
 
@@ -710,8 +761,8 @@ impl VirtualMachine {
                 if let Value::Reference(id) = val {
                     if let HeapObject::Box(inner) = self.heap.get(id)? {
                         self.stack.push(inner.clone())?;
-                    } else { return Err(VreError::TypeMismatch); }
-                } else { return Err(VreError::TypeMismatch); }
+                    } else { return panic!("TypeMismatch at {}", line!()); }
+                } else { return panic!("TypeMismatch at {}", line!()); }
                 Ok(())
             }
 
@@ -721,8 +772,8 @@ impl VirtualMachine {
                 if let Value::Reference(id) = target {
                     if let HeapObject::Box(ref mut inner) = self.heap.get_mut(id)? {
                         *inner = val;
-                    } else { return Err(VreError::TypeMismatch); }
-                } else { return Err(VreError::TypeMismatch); }
+                    } else { return panic!("TypeMismatch at {}", line!()); }
+                } else { return panic!("TypeMismatch at {}", line!()); }
                 Ok(())
             }
             OpCode::CallNative => {
@@ -765,7 +816,7 @@ impl VirtualMachine {
                     let target_val = args.pop().unwrap();
                     let fn_name = match target_val {
                         Value::String(s) => s,
-                        _ => return Err(VreError::TypeMismatch),
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                     };
                     let entry_ip = self.function_table.get(&fn_name).copied()
                         .ok_or_else(|| VreError::NativeFunctionError(
@@ -788,7 +839,7 @@ impl VirtualMachine {
                         Value::Int64(d) => d as u64,
                         Value::Int32(d) => d as u64,
                         Value::Float64(d) => d as u64,
-                        _ => return Err(VreError::TypeMismatch),
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                     };
                     
                     self.stack.push(Value::Null)?;
@@ -813,7 +864,7 @@ impl VirtualMachine {
                         Value::Int64(id) => id as u64,
                         Value::Int32(id) => id as u64,
                         Value::Float64(id) => id as u64,
-                        _ => return Err(VreError::TypeMismatch),
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                     };
                     
                     let task = crate::scheduler::Task {
@@ -837,13 +888,13 @@ impl VirtualMachine {
                         Value::Int64(d) => d as u64,
                         Value::Int32(d) => d as u64,
                         Value::Float64(d) => d as u64,
-                        _ => return Err(VreError::TypeMismatch),
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                     };
                     
                     let fn_name_val = args.pop().unwrap();
                     let fn_name = match fn_name_val {
                         Value::String(s) => s,
-                        _ => return Err(VreError::TypeMismatch),
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                     };
                     let entry_ip = self.function_table.get(&fn_name).copied()
                         .ok_or_else(|| VreError::NativeFunctionError(
@@ -894,7 +945,7 @@ impl VirtualMachine {
                 let path_idx = self.read_u16()? as usize;
                 let module_path = match self.constants.get(path_idx)? {
                     Value::String(s) => s,
-                    _ => return Err(VreError::TypeMismatch),
+                    _ => return panic!("TypeMismatch at {}", line!()),
                 };
 
                 // Canonicalize the path to use as a cache key
@@ -930,7 +981,7 @@ impl VirtualMachine {
                     compiled.function_table,
                 ).map_err(|e| VreError::NativeFunctionError(e))?;
 
-                child_vm.execute()?;
+                Box::pin(child_vm.execute()).await?;
 
                 // Collect exports the child registered, cache them, push as struct
                 let exports = std::mem::take(&mut child_vm.pending_exports);
@@ -945,7 +996,7 @@ impl VirtualMachine {
                 let name_idx = self.read_u16()? as usize;
                 let export_name = match self.constants.get(name_idx)? {
                     Value::String(s) => s,
-                    _ => return Err(VreError::TypeMismatch),
+                    _ => return panic!("TypeMismatch at {}", line!()),
                 };
                 let val = self.stack.pop()?;
                 self.pending_exports.insert(export_name, val);
@@ -955,7 +1006,10 @@ impl VirtualMachine {
             // ── Heap and Objects ───────────────────────────────────────────
             OpCode::NewArray => {
                 let size = self.pop_number()? as usize;
-                let arr = vec![Value::Null; size];
+                let mut arr = vec![Value::Null; size];
+                for i in (0..size).rev() {
+                    arr[i] = self.stack.pop()?;
+                }
                 let id = self.heap.allocate(HeapObject::Array(arr));
                 self.stack.push(Value::Reference(id))
             }
@@ -963,33 +1017,52 @@ impl VirtualMachine {
             OpCode::LoadElement => {
                 let index_val = self.stack.pop()?;
                 let ref_val = self.stack.pop()?;
+                
+                let struct_key = match &index_val {
+                    Value::String(s) => Some(s.clone()),
+                    Value::Reference(id) => {
+                        if let Ok(HeapObject::String(s)) = self.heap.get(*id) {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                
                 if let Value::Reference(id) = ref_val {
                     let obj = self.heap.get(id)?;
                     match obj {
                         HeapObject::Array(arr) => {
-                            if let Value::Float64(n) = index_val {
-                                let index = n as usize;
+                            let index_opt = match index_val {
+                                Value::Float64(n) => Some(n as usize),
+                                Value::Float32(n) => Some(n as usize),
+                                Value::Int64(n) => Some(n as usize),
+                                Value::Int32(n) => Some(n as usize),
+                                _ => None,
+                            };
+                            if let Some(index) = index_opt {
                                 if index >= arr.len() {
                                     println!("StoreElement array bound fault! Index: {}, len: {}", index, arr.len());
                                     return Err(VreError::RuntimeFault);
                                 }
                                 self.stack.push(arr[index].clone())
                             } else {
-                                return Err(VreError::TypeMismatch);
+                                return panic!("TypeMismatch at {}", line!());
                             }
                         }
                         HeapObject::Struct(fields) => {
-                            if let Value::String(s) = index_val {
+                            if let Some(s) = struct_key {
                                 let val = fields.get(&s).cloned().unwrap_or(Value::Null);
                                 self.stack.push(val)
                             } else {
-                                return Err(VreError::TypeMismatch);
+                                return panic!("TypeMismatch at {}", line!());
                             }
                         }
-                        _ => return Err(VreError::TypeMismatch),
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                     }
                 } else {
-                    return Err(VreError::TypeMismatch);
+                    return panic!("TypeMismatch at {}", line!());
                 }
             }
 
@@ -997,12 +1070,31 @@ impl VirtualMachine {
                 let val = self.stack.pop()?;
                 let index_val = self.stack.pop()?;
                 let ref_val = self.stack.pop()?;
+                
+                let struct_key = match &index_val {
+                    Value::String(s) => Some(s.clone()),
+                    Value::Reference(id) => {
+                        if let Ok(HeapObject::String(s)) = self.heap.get(*id) {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                
                 if let Value::Reference(id) = ref_val {
                     let obj = self.heap.get_mut(id)?;
                     match obj {
                         HeapObject::Array(arr) => {
-                            if let Value::Float64(n) = index_val {
-                                let index = n as usize;
+                            let index_opt = match index_val {
+                                Value::Float64(n) => Some(n as usize),
+                                Value::Float32(n) => Some(n as usize),
+                                Value::Int64(n) => Some(n as usize),
+                                Value::Int32(n) => Some(n as usize),
+                                _ => None,
+                            };
+                            if let Some(index) = index_opt {
                                 if index >= arr.len() {
                                     println!("StoreElement array bound fault! Index: {}, len: {}", index, arr.len());
                                     return Err(VreError::RuntimeFault);
@@ -1010,21 +1102,21 @@ impl VirtualMachine {
                                 arr[index] = val;
                                 Ok(())
                             } else {
-                                return Err(VreError::TypeMismatch);
+                                return panic!("TypeMismatch at {}", line!());
                             }
                         }
                         HeapObject::Struct(fields) => {
-                            if let Value::String(s) = index_val {
+                            if let Some(s) = struct_key {
                                 fields.insert(s, val);
                                 Ok(())
                             } else {
-                                return Err(VreError::TypeMismatch);
+                                return panic!("TypeMismatch at {}", line!());
                             }
                         }
-                        _ => Err(VreError::TypeMismatch),
+                        _ => panic!("TypeMismatch at {}", line!()),
                     }
                 } else {
-                    Err(VreError::TypeMismatch)
+                    panic!("TypeMismatch at {}", line!())
                 }
             }
 
@@ -1035,7 +1127,29 @@ impl VirtualMachine {
                     let val = self.stack.pop()?;
                     let key = match self.stack.pop()? {
                         Value::String(s) => s,
-                        _ => return Err(VreError::TypeMismatch),
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
+                    };
+                    fields.insert(key, val);
+                }
+                let id = self.heap.allocate(HeapObject::Struct(fields));
+                self.stack.push(Value::Reference(id))
+            }
+
+            OpCode::NewDict => {
+                let count = self.pop_number()? as usize;
+                let mut fields = std::collections::HashMap::new();
+                for _ in 0..count {
+                    let val = self.stack.pop()?;
+                    let key_val = self.stack.pop()?;
+                    // Convert key to string if it's not already
+                    let key = match key_val {
+                        Value::String(s) => s,
+                        Value::Float64(n) => n.to_string(),
+                        Value::Int64(n) => n.to_string(),
+                        Value::Int32(n) => n.to_string(),
+                        Value::Float32(n) => n.to_string(),
+                        Value::Bool(b) => b.to_string(),
+                        _ => { println!("TypeMismatch at NewDict key"); return panic!("TypeMismatch at {}", line!()) },
                     };
                     fields.insert(key, val);
                 }
@@ -1047,20 +1161,34 @@ impl VirtualMachine {
                 let name_idx = self.read_u16()? as usize;
                 let name = match self.constants.get(name_idx)? {
                     Value::String(s) => s,
-                    _ => return Err(VreError::TypeMismatch),
+                    _ => return panic!("TypeMismatch at {}", line!()),
                 };
                 let ref_val = self.stack.pop()?;
                 if let Value::Reference(id) = ref_val {
                     let obj = self.heap.get(id)?;
                     match obj {
                         HeapObject::Struct(fields) => {
-                            let val = fields.get(&name).cloned().unwrap_or(Value::Null);
+                            let val = fields.get(&name.clone()).cloned().unwrap_or(Value::Null);
                             self.stack.push(val)
                         }
-                        _ => return Err(VreError::TypeMismatch),
+                        HeapObject::Array(arr) => {
+                            if name == "length" {
+                                self.stack.push(Value::Float64(arr.len() as f64))
+                            } else {
+                                return panic!("TypeMismatch at {}", line!());
+                            }
+                        }
+                        HeapObject::String(s) => {
+                            if name == "length" {
+                                self.stack.push(Value::Float64(s.len() as f64))
+                            } else {
+                                return panic!("TypeMismatch at {}", line!());
+                            }
+                        }
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                     }
                 } else {
-                    return Err(VreError::TypeMismatch);
+                    return panic!("TypeMismatch at {}", line!());
                 }
             }
 
@@ -1068,7 +1196,7 @@ impl VirtualMachine {
                 let name_idx = self.read_u16()? as usize;
                 let name = match self.constants.get(name_idx)? {
                     Value::String(s) => s,
-                    _ => return Err(VreError::TypeMismatch),
+                    _ => return panic!("TypeMismatch at {}", line!()),
                 };
                 let val = self.stack.pop()?;
                 let ref_val = self.stack.pop()?;
@@ -1079,10 +1207,10 @@ impl VirtualMachine {
                             fields.insert(name, val);
                             Ok(())
                         }
-                        _ => return Err(VreError::TypeMismatch),
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
                     }
                 } else {
-                    return Err(VreError::TypeMismatch);
+                    return panic!("TypeMismatch at {}", line!());
                 }
             }
 
@@ -1121,7 +1249,7 @@ impl VirtualMachine {
                                 let mut buf = vec![0u8; 1024]; // Temporary buffer
                                 let res = match &mut resource {
                                     Resource::File(f) => f.read(&mut buf),
-                                    Resource::TcpStream(s) => s.read(&mut buf),
+                                    Resource::TcpStream(s) => s.try_read(&mut buf),
                                     _ => Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid resource for read")),
                                 };
 
@@ -1145,7 +1273,7 @@ impl VirtualMachine {
                                 self.stack.push(Value::Float64(-1.0))?;
                             }
                         } else {
-                            return Err(VreError::TypeMismatch);
+                            return panic!("TypeMismatch at {}", line!());
                         }
                         Ok(())
                     }
@@ -1166,7 +1294,7 @@ impl VirtualMachine {
                                 if let Some(mut resource) = self.resources.remove(&fd) {
                                     let res = match &mut resource {
                                         Resource::File(f) => f.write(&buf),
-                                        Resource::TcpStream(s) => s.write(&buf),
+                                        Resource::TcpStream(s) => s.try_write(&buf),
                                         _ => Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid resource for write")),
                                     };
                                     match res {
@@ -1178,10 +1306,10 @@ impl VirtualMachine {
                                     self.stack.push(Value::Float64(-1.0))?;
                                 }
                             } else {
-                                return Err(VreError::TypeMismatch);
+                                return panic!("TypeMismatch at {}", line!());
                             }
                         } else {
-                            return Err(VreError::TypeMismatch);
+                            return panic!("TypeMismatch at {}", line!());
                         }
                         Ok(())
                     }
@@ -1247,7 +1375,7 @@ impl VirtualMachine {
                                 Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
                             }
                         } else {
-                            return Err(VreError::TypeMismatch);
+                            return panic!("TypeMismatch at {}", line!());
                         }
                         Ok(())
                     }
@@ -1260,22 +1388,17 @@ impl VirtualMachine {
                         let host_val = self.stack.pop()?;
                         if let Value::String(host) = host_val {
                             let addr = format!("{}:{}", host, port);
-                            match crate::pal::get_pal().tcp_connect(&addr) {
+                            match crate::pal::get_pal().tcp_connect(&addr).await {
                                 Ok(std_stream) => {
-                                    std_stream.set_nonblocking(true).map_err(|_| VreError::RuntimeFault)?;
-                                    let mut stream = mio::net::TcpStream::from_std(std_stream);
                                     let fd = self.next_fd;
                                     self.next_fd += 1;
-                                    if let Err(_) = self.poll.registry().register(&mut stream, Token(fd), Interest::READABLE | Interest::WRITABLE) {
-                                        return Err(VreError::RuntimeFault);
-                                    }
-                                    self.resources.insert(fd, Resource::TcpStream(stream));
+                                    self.resources.insert(fd, Resource::TcpStream(std_stream));
                                     self.stack.push(Value::Float64(fd as f64))?;
                                 }
                                 Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
                             }
                         } else {
-                            return Err(VreError::TypeMismatch);
+                            return panic!("TypeMismatch at {}", line!());
                         }
                         Ok(())
                     }
@@ -1286,16 +1409,11 @@ impl VirtualMachine {
 
                         let port = self.pop_number()? as u16;
                         let addr = format!("127.0.0.1:{}", port);
-                        match crate::pal::get_pal().tcp_bind(&addr) {
+                        match crate::pal::get_pal().tcp_bind(&addr).await {
                             Ok(std_listener) => {
-                                std_listener.set_nonblocking(true).map_err(|_| VreError::RuntimeFault)?;
-                                let mut listener = mio::net::TcpListener::from_std(std_listener);
                                 let fd = self.next_fd;
                                 self.next_fd += 1;
-                                if let Err(_) = self.poll.registry().register(&mut listener, Token(fd), Interest::READABLE) {
-                                    return Err(VreError::RuntimeFault);
-                                }
-                                self.resources.insert(fd, Resource::TcpListener(listener));
+                                self.resources.insert(fd, Resource::TcpListener(std_listener));
                                 self.stack.push(Value::Float64(fd as f64))?;
                             }
                             Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
@@ -1305,18 +1423,23 @@ impl VirtualMachine {
                     0x22 => {
                         // net_accept(server_fd) -> fd
                         let server_fd = self.pop_number()? as usize;
-                        if let Some(Resource::TcpListener(listener)) = self.resources.get(&server_fd) {
-                            match listener.accept() {
-                                Ok((mut stream, _)) => {
+                        let mut listener_opt = None;
+                        if let Some(Resource::TcpListener(listener)) = self.resources.remove(&server_fd) {
+                            listener_opt = Some(listener);
+                        }
+                        if let Some(listener) = listener_opt {
+                            let result = tokio::time::timeout(std::time::Duration::from_nanos(0), listener.accept()).await;
+                            self.resources.insert(server_fd, Resource::TcpListener(listener));
+                            match result {
+                                Ok(Ok((stream, _))) => {
                                     let fd = self.next_fd;
                                     self.next_fd += 1;
-                                    if let Err(_) = self.poll.registry().register(&mut stream, Token(fd), Interest::READABLE | Interest::WRITABLE) {
-                                        return Err(VreError::RuntimeFault);
-                                    }
                                     self.resources.insert(fd, Resource::TcpStream(stream));
                                     self.stack.push(Value::Float64(fd as f64))?;
                                 }
-                                Err(_) => { self.stack.push(Value::Float64(-1.0))?; }
+                                _ => {
+                                    self.stack.push(Value::Float64(-1.0))?;
+                                }
                             }
                         } else {
                             self.stack.push(Value::Float64(-1.0))?;
@@ -1326,40 +1449,93 @@ impl VirtualMachine {
                     0x23 => {
                         // net_set_nonblocking(fd, is_nonblocking)
                         let _is_nonblocking = self.pop_number()? != 0.0;
-                        let fd = self.pop_number()? as usize;
-                        if let Some(resource) = self.resources.get_mut(&fd) {
-                            match resource {
-                                Resource::TcpListener(_) => {
-                                    // mio sockets are always non-blocking
-                                }
-                                Resource::TcpStream(_) => {
-                                    // mio sockets are always non-blocking
-                                }
-                                _ => {}
-                            }
-                        }
+                        let _fd = self.pop_number()? as usize;
                         self.stack.push(Value::Float64(0.0))?;
                         Ok(())
                     }
                     0x24 => {
                         // net_poll() -> Array of fds
-                        let cap = Capability::new("net.listen"); // Just a rough capability check for networking
+                        let cap = Capability::new("net.listen"); 
                         self.capabilities.require(&cap)?;
-
-                        match self.poll.poll(&mut self.events, None) {
-                            Ok(_) => {
-                                let mut fds = Vec::new();
-                                for event in self.events.iter() {
-                                    fds.push(Value::Float64(event.token().0 as f64));
+                        tokio::task::yield_now().await;
+                        
+                        let mut fds = Vec::new();
+                        for (fd, res) in self.resources.iter() {
+                            match res {
+                                Resource::TcpListener(_) => {
+                                    fds.push(Value::Float64(*fd as f64));
                                 }
-                                let array_obj = HeapObject::Array(fds);
-                                let ref_id = self.heap.allocate(array_obj);
-                                self.stack.push(Value::Reference(ref_id))?;
-                            }
-                            Err(_) => {
-                                return Err(VreError::RuntimeFault);
+                                Resource::TcpStream(stream) => {
+                                    if tokio::time::timeout(std::time::Duration::from_nanos(0), stream.readable()).await.is_ok() {
+                                        fds.push(Value::Float64(*fd as f64));
+                                    }
+                                }
+                                _ => {}
                             }
                         }
+                        let array_obj = HeapObject::Array(fds);
+                        let ref_id = self.heap.allocate(array_obj);
+                        self.stack.push(Value::Reference(ref_id))?;
+                        Ok(())
+                    }
+                    0x25 => {
+                        // net_read(fd, max_len) -> string
+                        let max_len = self.pop_number()? as usize;
+                        let fd = self.pop_number()? as usize;
+                        let mut stream_opt = None;
+                        if let Some(Resource::TcpStream(stream)) = self.resources.remove(&fd) {
+                            stream_opt = Some(stream);
+                        }
+                        if let Some(mut stream) = stream_opt {
+                            use tokio::io::AsyncReadExt;
+                            let mut buf = vec![0u8; max_len];
+                            match stream.read(&mut buf).await {
+                                Ok(0) => {
+                                    self.stack.push(Value::String("".to_string()))?; // EOF
+                                }
+                                Ok(n) => {
+                                    buf.truncate(n);
+                                    let s = String::from_utf8_lossy(&buf).into_owned();
+                                    self.stack.push(Value::String(s))?;
+                                }
+                                Err(_) => {
+                                    self.stack.push(Value::String("".to_string()))?; // Error
+                                }
+                            }
+                            self.resources.insert(fd, Resource::TcpStream(stream));
+                        } else {
+                            self.stack.push(Value::String("".to_string()))?;
+                        }
+                        Ok(())
+                    }
+                    0x26 => {
+                        // net_write(fd, string) -> bool
+                        let val = self.stack.pop()?;
+                        let s = match val {
+                            Value::String(st) => st,
+                            _ => return panic!("TypeMismatch at net_write"),
+                        };
+                        let fd = self.pop_number()? as usize;
+                        let mut success = false;
+                        let mut stream_opt = None;
+                        if let Some(Resource::TcpStream(stream)) = self.resources.remove(&fd) {
+                            stream_opt = Some(stream);
+                        }
+                        if let Some(mut stream) = stream_opt {
+                            use tokio::io::AsyncWriteExt;
+                            if stream.write_all(s.as_bytes()).await.is_ok() {
+                                success = true;
+                            }
+                            self.resources.insert(fd, Resource::TcpStream(stream));
+                        }
+                        self.stack.push(Value::Bool(success))?;
+                        Ok(())
+                    }
+                    0x27 => {
+                        // net_close(fd) -> bool
+                        let fd = self.pop_number()? as usize;
+                        let success = self.resources.remove(&fd).is_some();
+                        self.stack.push(Value::Bool(success))?;
                         Ok(())
                     }
                     0x30 => {
@@ -1371,7 +1547,7 @@ impl VirtualMachine {
                             let id = self.heap.allocate(HeapObject::Array(arr));
                             self.stack.push(Value::Reference(id))?;
                         } else {
-                            return Err(VreError::TypeMismatch);
+                            return panic!("TypeMismatch at {}", line!());
                         }
                         Ok(())
                     }
@@ -1386,21 +1562,45 @@ impl VirtualMachine {
                                     if let Value::Float64(n) = item {
                                         bytes.push(*n as u8);
                                     } else {
-                                        return Err(VreError::TypeMismatch);
+                                        println!("TypeMismatch at bytes_to_string element");
+                                        return panic!("TypeMismatch at {}", line!());
                                     }
                                 }
                                 let s = String::from_utf8_lossy(&bytes).into_owned();
                                 self.stack.push(Value::String(s))?;
                             } else {
-                                return Err(VreError::TypeMismatch);
+                                println!("TypeMismatch at bytes_to_string array");
+                                return panic!("TypeMismatch at {}", line!());
                             }
                         } else {
-                            return Err(VreError::TypeMismatch);
+                            return panic!("TypeMismatch at {}", line!());
                         }
                         Ok(())
                     }
-                    _ => Err(VreError::RuntimeFault),
+                    _ => return Err(VreError::RuntimeFault),
                 }
+            }
+            OpCode::NotBool => {
+                let b = self.pop_bool()?;
+                self.stack.push(Value::Bool(!b))
+            }
+            OpCode::NewDict => {
+                let count = self.pop_number()? as usize;
+                let mut dict = std::collections::HashMap::new();
+                for _ in 0..count {
+                    let val = self.stack.pop()?;
+                    let key = match self.stack.pop()? {
+                        Value::String(s) => s,
+                        _ => { println!("TypeMismatch at LoadProperty HeapObject"); return panic!("TypeMismatch at {}", line!()) },
+                    };
+                    dict.insert(key, val);
+                }
+                let id = self.heap.allocate(HeapObject::Struct(dict));
+                self.stack.push(Value::Reference(id))
+            }
+            OpCode::NewClass | OpCode::CallMethod => {
+                // To be implemented in VM execution phase
+                Err(VreError::RuntimeFault)
             }
         }
     }
@@ -1546,16 +1746,19 @@ impl VirtualMachine {
         Ok(())
     }
 
-    /// Pop a number from the stack, returning TypeMismatch on wrong type
     fn pop_number(&mut self) -> VreResult<f64> {
-        self.stack.pop()?.as_f64()
+        let val = self.stack.pop()?;
+        match val {
+            Value::Float64(n) => Ok(n),
+            _ => { println!("TypeMismatch in pop_number: {:?}", val); panic!("TypeMismatch at {}", line!()) }
+        }
     }
 
     /// Pop a bool from the stack, returning TypeMismatch on wrong type
     fn pop_bool(&mut self) -> VreResult<bool> {
         match self.stack.pop()? {
             Value::Bool(b) => Ok(b),
-            _ => Err(VreError::TypeMismatch),
+            _ => { println!("TypeMismatch in pop_bool"); panic!("TypeMismatch at {}", line!()) },
         }
     }
 
@@ -1596,35 +1799,49 @@ impl VirtualMachine {
     fn pop_i32(&mut self) -> VreResult<i32> {
         match self.stack.pop()? {
             Value::Int32(v) => Ok(v),
-            _ => Err(VreError::TypeMismatch),
+            Value::Float64(v) => Ok(v as i32),
+            _ => panic!("TypeMismatch at {}", line!()),
         }
     }
 
     fn pop_i64(&mut self) -> VreResult<i64> {
         match self.stack.pop()? {
             Value::Int64(v) => Ok(v),
-            _ => Err(VreError::TypeMismatch),
+            _ => panic!("TypeMismatch at {}", line!()),
         }
     }
 
     fn pop_f32(&mut self) -> VreResult<f32> {
         match self.stack.pop()? {
             Value::Float32(v) => Ok(v),
-            _ => Err(VreError::TypeMismatch),
+            _ => panic!("TypeMismatch at {}", line!()),
         }
     }
 
     fn pop_f64(&mut self) -> VreResult<f64> {
-        match self.stack.pop()? {
+        let val = self.stack.pop()?;
+        match val {
             Value::Float64(v) => Ok(v),
-            _ => Err(VreError::TypeMismatch),
+            Value::Int32(v) => Ok(v as f64),
+            Value::Int64(v) => Ok(v as f64),
+            _ => { println!("TypeMismatch at pop_f64: {:?}", val); panic!("TypeMismatch at {}", line!()) }
         }
     }
 
     fn pop_string(&mut self) -> VreResult<String> {
-        match self.stack.pop()? {
+        let val = self.stack.pop()?;
+        match val {
             Value::String(s) => Ok(s),
-            _ => Err(VreError::TypeMismatch),
+            Value::Reference(id) => {
+                let obj = self.heap.get(id)?;
+                if let HeapObject::String(s) = obj {
+                    Ok(s.clone())
+                } else {
+                    println!("TypeMismatch in pop_string (ref is not a string): {:?}", id);
+                    panic!("TypeMismatch at {}", line!())
+                }
+            }
+            _ => { println!("TypeMismatch in pop_string (not a string or ref): {:?}", val); panic!("TypeMismatch at {}", line!()) },
         }
     }
 

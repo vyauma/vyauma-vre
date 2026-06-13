@@ -1,0 +1,4 @@
+// Process Module
+
+export fn exit(code: Int32):
+    ffi_process_exit(code)

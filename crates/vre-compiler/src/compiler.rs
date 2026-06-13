@@ -26,6 +26,13 @@ pub struct Compiler {
     // Currently compiled function context
     locals: HashMap<String, u16>,
     local_count: u16,
+
+    // Function parameter names for named arguments reordering
+    function_signatures: HashMap<String, Vec<String>>,
+
+    // For single-level closure upvalue resolution
+    outer_locals: Option<HashMap<String, u16>>,
+    current_upvalues: Vec<(String, u16)>, // (name, outer_local_idx)
 }
 
 impl Compiler {
@@ -37,10 +44,19 @@ impl Compiler {
             unresolved_calls: Vec::new(),
             locals: HashMap::new(),
             local_count: 0,
+            function_signatures: HashMap::new(),
+            outer_locals: None,
+            current_upvalues: Vec::new(),
         }
     }
 
     pub fn compile(mut self, program: Program) -> Result<CompiledProgram, String> {
+        // Pre-pass to populate function signatures for named arguments
+        for func in &program.functions {
+            let param_names = func.params.iter().map(|p| p.0.clone()).collect();
+            self.function_signatures.insert(func.name.clone(), param_names);
+        }
+
         // Emit jump to main at the start
         // We will emit Call <addr> <0>; Halt.
         // Call opcode: 1 byte + 4 bytes target + 2 bytes local_count = 7 bytes.
@@ -165,17 +181,28 @@ impl Compiler {
         match stmt {
             Stmt::Let(name, _, expr) => {
                 self.compile_expression(expr)?;
-                let idx = self.local_count;
-                self.locals.insert(name, idx);
+                let local_idx = self.local_count;
+                self.locals.insert(name.clone(), local_idx);
                 self.local_count += 1;
                 self.emit_opcode(OpCode::StoreLocal);
-                self.emit_u16(idx);
+                self.emit_u16(local_idx as u16);
+            }
+            Stmt::LetMut(name, _, expr) => {
+                self.compile_expression(expr)?;
+                let local_idx = self.local_count;
+                self.locals.insert(name.clone(), local_idx);
+                self.local_count += 1;
+                self.emit_opcode(OpCode::StoreLocal);
+                self.emit_u16(local_idx as u16);
             }
             Stmt::Assign(name, expr) => {
                 self.compile_expression(expr)?;
                 if let Some(&idx) = self.locals.get(&name) {
                     self.emit_opcode(OpCode::StoreLocal);
                     self.emit_u16(idx);
+                } else if let Some(upvalue_idx) = self.resolve_upvalue(&name) {
+                    self.emit_opcode(OpCode::StoreUpvalue);
+                    self.emit_u16(upvalue_idx);
                 } else {
                     return Err(format!("Undefined variable: {}", name));
                 }
@@ -407,73 +434,93 @@ impl Compiler {
                     };
                     self.emit_opcode(op);
                     self.emit_u16(idx);
+                } else if let Some(upvalue_idx) = self.resolve_upvalue(&name) {
+                    self.emit_opcode(OpCode::LoadUpvalue);
+                    self.emit_u16(upvalue_idx);
                 } else {
                     return Err(format!("Undefined variable: {}", name));
                 }
             }
-            Expr::BinaryOp(left, op, right, expr_type) => {
+            Expr::BinaryOp(left, op, right, opt_ty) => {
+                let left_ty = match &*left {
+                    Expr::Number(_) => Type::Float64,
+                    Expr::StringLiteral(_) => Type::String,
+                    Expr::Boolean(_) => Type::Bool,
+                    Expr::Identifier(_, t) | Expr::BinaryOp(_, _, _, t) | Expr::Call(_, _, t) | Expr::MethodCall(_, _, _, t) | Expr::PropertyAccess(_, _, t) | Expr::NamedCall(_, _, t) | Expr::NamedMethodCall(_, _, _, t) | Expr::IndexAccess(_, _, t) => t.clone().unwrap_or(Type::Float64),
+                    Expr::NewClass(n, _) | Expr::NamedNewClass(n, _) => Type::Class(n.clone()),
+                    Expr::StructInit(n, _) => Type::Struct(n.clone()),
+                    _ => Type::Float64,
+                };
+                
+                // For Add/Sub/Mul/Div, the operation type is the result type (opt_ty)
+                let math_ty = opt_ty.clone().unwrap_or(Type::Float64);
+                
+                // For Comparisons, the operation type is the operand's type
+                let cmp_ty = if left_ty == Type::Any { Type::Float64 } else { left_ty };
+
                 self.compile_expression(*left)?;
                 self.compile_expression(*right)?;
-                let ty = expr_type.unwrap_or(Type::Float64);
                 match op {
-                    BinaryOperator::Add => match ty {
+                    BinaryOperator::Add => match math_ty {
                         Type::Int32 => self.emit_opcode(OpCode::AddI32),
                         Type::Int64 => self.emit_opcode(OpCode::AddI64),
                         Type::Float32 => self.emit_opcode(OpCode::AddF32),
                         Type::String => self.emit_opcode(OpCode::AddStr),
                         _ => self.emit_opcode(OpCode::AddF64),
                     },
-                    BinaryOperator::Subtract => match ty {
+                    BinaryOperator::Subtract => match math_ty {
                         Type::Int32 => self.emit_opcode(OpCode::SubI32),
                         Type::Int64 => self.emit_opcode(OpCode::SubI64),
                         Type::Float32 => self.emit_opcode(OpCode::SubF32),
                         _ => self.emit_opcode(OpCode::SubF64),
                     },
-                    BinaryOperator::Multiply => match ty {
+                    BinaryOperator::Multiply => match math_ty {
                         Type::Int32 => self.emit_opcode(OpCode::MulI32),
                         Type::Int64 => self.emit_opcode(OpCode::MulI64),
                         Type::Float32 => self.emit_opcode(OpCode::MulF32),
                         _ => self.emit_opcode(OpCode::MulF64),
                     },
-                    BinaryOperator::Divide => match ty {
+                    BinaryOperator::Divide => match math_ty {
                         Type::Int32 => self.emit_opcode(OpCode::DivI32),
                         Type::Int64 => self.emit_opcode(OpCode::DivI64),
                         Type::Float32 => self.emit_opcode(OpCode::DivF32),
                         _ => self.emit_opcode(OpCode::DivF64),
                     },
-                    BinaryOperator::Equals => match ty {
+                    BinaryOperator::Equals => match cmp_ty {
                         Type::Int32 => self.emit_opcode(OpCode::EqualI32),
                         Type::Int64 => self.emit_opcode(OpCode::EqualI64),
                         Type::Float32 => self.emit_opcode(OpCode::EqualF32),
                         Type::String => self.emit_opcode(OpCode::EqualStr),
+                        Type::Bool => self.emit_opcode(OpCode::EqualBool),
                         _ => self.emit_opcode(OpCode::EqualF64),
                     },
-                    BinaryOperator::NotEquals => match ty {
+                    BinaryOperator::NotEquals => match cmp_ty {
                         Type::Int32 => self.emit_opcode(OpCode::NotEqualI32),
                         Type::Int64 => self.emit_opcode(OpCode::NotEqualI64),
                         Type::Float32 => self.emit_opcode(OpCode::NotEqualF32),
                         Type::String => self.emit_opcode(OpCode::NotEqualStr),
+                        Type::Bool => self.emit_opcode(OpCode::NotEqualBool),
                         _ => self.emit_opcode(OpCode::NotEqualF64),
                     },
-                    BinaryOperator::LessThan => match ty {
+                    BinaryOperator::LessThan => match cmp_ty {
                         Type::Int32 => self.emit_opcode(OpCode::LessI32),
                         Type::Int64 => self.emit_opcode(OpCode::LessI64),
                         Type::Float32 => self.emit_opcode(OpCode::LessF32),
                         _ => self.emit_opcode(OpCode::LessF64),
                     },
-                    BinaryOperator::LessThanOrEq => match ty {
+                    BinaryOperator::LessThanOrEq => match cmp_ty {
                         Type::Int32 => self.emit_opcode(OpCode::LessEqualI32),
                         Type::Int64 => self.emit_opcode(OpCode::LessEqualI64),
                         Type::Float32 => self.emit_opcode(OpCode::LessEqualF32),
                         _ => self.emit_opcode(OpCode::LessEqualF64),
                     },
-                    BinaryOperator::GreaterThan => match ty {
+                    BinaryOperator::GreaterThan => match cmp_ty {
                         Type::Int32 => self.emit_opcode(OpCode::GreaterI32),
                         Type::Int64 => self.emit_opcode(OpCode::GreaterI64),
                         Type::Float32 => self.emit_opcode(OpCode::GreaterF32),
                         _ => self.emit_opcode(OpCode::GreaterF64),
                     },
-                    BinaryOperator::GreaterThanOrEq => match ty {
+                    BinaryOperator::GreaterThanOrEq => match cmp_ty {
                         Type::Int32 => self.emit_opcode(OpCode::GreaterEqualI32),
                         Type::Int64 => self.emit_opcode(OpCode::GreaterEqualI64),
                         Type::Float32 => self.emit_opcode(OpCode::GreaterEqualF32),
@@ -572,6 +619,23 @@ impl Compiler {
                         self.emit_opcode(OpCode::Syscall);
                         self.emit_u8(0x24);
                     }
+                    "net_read" => {
+                        self.compile_expression(args[0].clone())?;
+                        self.compile_expression(args[1].clone())?;
+                        self.emit_opcode(OpCode::Syscall);
+                        self.emit_u8(0x25);
+                    }
+                    "net_write" => {
+                        self.compile_expression(args[0].clone())?;
+                        self.compile_expression(args[1].clone())?;
+                        self.emit_opcode(OpCode::Syscall);
+                        self.emit_u8(0x26);
+                    }
+                    "net_close" => {
+                        self.compile_expression(args[0].clone())?;
+                        self.emit_opcode(OpCode::Syscall);
+                        self.emit_u8(0x27);
+                    }
                     "string_to_bytes" => {
                         self.compile_expression(args[0].clone())?;
                         self.emit_opcode(OpCode::Syscall);
@@ -614,7 +678,7 @@ impl Compiler {
                     self.emit_opcode(OpCode::StoreElement);
                 }
             }
-            Expr::IndexAccess(array_expr, index_expr) => {
+            Expr::IndexAccess(array_expr, index_expr, _) => {
                 self.compile_expression(*array_expr)?; // pushes Ref
                 self.compile_expression(*index_expr)?; // pushes index
                 self.emit_opcode(OpCode::LoadElement);
@@ -641,7 +705,7 @@ impl Compiler {
                 let count_idx = self.add_constant(Value::Float64(count));
                 self.emit_opcode(OpCode::Push);
                 self.emit_u16(count_idx);
-                self.emit_opcode(OpCode::NewStruct);
+                self.emit_opcode(OpCode::NewDict);
             }
             Expr::PropertyAccess(obj_expr, prop_name, _) => {
                 self.compile_expression(*obj_expr)?;
@@ -649,11 +713,126 @@ impl Compiler {
                 self.emit_opcode(OpCode::LoadProperty);
                 self.emit_u16(prop_idx);
             }
-            Expr::NewClass(_, _) | Expr::MethodCall(_, _, _, _) => {
-                unreachable!("Type checker transforms these into StructInit and Call")
+            Expr::NewClass(_, _) | Expr::MethodCall(_, _, _, _) | Expr::CallDynamic(_, _, _) => {
+                unreachable!("Type checker transforms these into StructInit and Call or VIR builder handles it")
+            }
+            Expr::NamedCall(name, args, _) => {
+                let param_names = match self.function_signatures.get(&name) {
+                    Some(params) => params.clone(),
+                    None => return Err(format!("Cannot use named arguments for unknown or builtin function {}", name)),
+                };
+
+                let mut reordered_args = vec![None; param_names.len()];
+                let mut positional_index = 0;
+
+                for arg in args {
+                    if let Some(arg_name) = arg.name {
+                        if let Some(idx) = param_names.iter().position(|p| p == &arg_name) {
+                            reordered_args[idx] = Some(arg.value);
+                        } else {
+                            return Err(format!("Function {} has no parameter named {}", name, arg_name));
+                        }
+                    } else {
+                        while positional_index < reordered_args.len() && reordered_args[positional_index].is_some() {
+                            positional_index += 1;
+                        }
+                        if positional_index < reordered_args.len() {
+                            reordered_args[positional_index] = Some(arg.value);
+                            positional_index += 1;
+                        } else {
+                            return Err(format!("Too many positional arguments for function {}", name));
+                        }
+                    }
+                }
+
+                let arg_count = reordered_args.len() as u8;
+                for (i, arg_opt) in reordered_args.into_iter().enumerate() {
+                    match arg_opt {
+                        Some(expr) => self.compile_expression(expr)?,
+                        None => return Err(format!("Missing argument '{}' for function {}", param_names[i], name)),
+                    }
+                }
+
+                self.emit_opcode(OpCode::Call);
+                self.unresolved_calls.push((self.instructions.len(), name.clone(), arg_count));
+                self.emit_u32(0);
+                self.emit_u16(256);
+            }
+            Expr::NamedMethodCall(_, _, _, _) | Expr::NamedNewClass(_, _) => {
+                return Err("v2 AST nodes not yet supported in bytecode compiler".into());
+            }
+            Expr::Closure { params, return_type: _, body } => {
+                if self.outer_locals.is_some() {
+                    return Err("Nested closures (more than 1 level) are not yet supported".into());
+                }
+
+                self.emit_opcode(OpCode::Jump);
+                let jump_over_offset = self.instructions.len();
+                self.emit_u32(0); // placeholder
+
+                let closure_start = self.instructions.len() as u32;
+
+                let saved_locals = self.locals.clone();
+                let saved_local_count = self.local_count;
+
+                self.outer_locals = Some(saved_locals.clone());
+                self.current_upvalues.clear();
+
+                self.locals.clear();
+                self.local_count = 0;
+
+                for param in params.iter() {
+                    self.locals.insert(param.0.clone(), self.local_count);
+                    self.local_count += 1;
+                }
+
+                for param in params.iter().rev() {
+                    let idx = *self.locals.get(&param.0).unwrap();
+                    self.emit_opcode(OpCode::StoreLocal);
+                    self.emit_u16(idx);
+                }
+
+                self.compile_block(body)?;
+
+                let null_idx = self.add_constant(Value::Null);
+                self.emit_opcode(OpCode::Push);
+                self.emit_u16(null_idx);
+                self.emit_opcode(OpCode::Return);
+
+                self.locals = saved_locals;
+                self.local_count = saved_local_count;
+                self.outer_locals = None;
+
+                let closure_end = self.instructions.len() as u32;
+                self.patch_u32(jump_over_offset, closure_end);
+
+                let upvalues = self.current_upvalues.clone();
+                for (_, outer_idx) in &upvalues {
+                    self.emit_opcode(OpCode::LoadLocal);
+                    self.emit_u16(*outer_idx);
+                    self.emit_opcode(OpCode::BoxValue);
+                }
+
+                self.emit_opcode(OpCode::NewClosure);
+                self.emit_u32(closure_start);
+                self.emit_u16(upvalues.len() as u16);
             }
         }
         Ok(())
+    }
+
+    fn resolve_upvalue(&mut self, name: &str) -> Option<u16> {
+        if let Some(outer) = &self.outer_locals {
+            if let Some(&outer_idx) = outer.get(name) {
+                if let Some(pos) = self.current_upvalues.iter().position(|(n, _)| n == name) {
+                    return Some(pos as u16);
+                }
+                let pos = self.current_upvalues.len() as u16;
+                self.current_upvalues.push((name.to_string(), outer_idx));
+                return Some(pos);
+            }
+        }
+        None
     }
 
     fn add_constant(&mut self, val: Value) -> u16 {

@@ -27,6 +27,7 @@ fn run_async_vm(constants: Vec<Value>, instructions: Vec<u8>) -> VreResult<Optio
         constants,
         vec![],
         make_caps(),
+        std::collections::HashMap::new(),
     )
     .unwrap();
     vm.execute()?;
@@ -38,8 +39,8 @@ fn run_async_vm(constants: Vec<Value>, instructions: Vec<u8>) -> VreResult<Optio
 #[test]
 fn test_scheduler_spawn_and_pop() {
     let mut sched = Scheduler::new();
-    let id1 = sched.spawn(0, 1024);
-    let id2 = sched.spawn(100, 1024);
+    let id1 = sched.spawn(0, 1024, 256);
+    let id2 = sched.spawn(100, 1024, 256);
     assert_eq!(sched.task_count(), 2);
 
     let t1 = sched.pop_next().expect("Should have task 1");
@@ -52,7 +53,7 @@ fn test_scheduler_spawn_and_pop() {
 #[test]
 fn test_scheduler_block_and_unblock() {
     let mut sched = Scheduler::new();
-    let id = sched.spawn(0, 1024);
+    let id = sched.spawn(0, 1024, 256);
     assert_eq!(sched.task_count(), 1);
 
     let task = sched.pop_next().unwrap();
@@ -70,7 +71,7 @@ fn test_scheduler_block_and_unblock() {
 #[test]
 fn test_scheduler_yield_task() {
     let mut sched = Scheduler::new();
-    let _id = sched.spawn(0, 1024);
+    let _id = sched.spawn(0, 1024, 256);
 
     let task = sched.pop_next().unwrap();
     sched.yield_task(task);
@@ -85,7 +86,7 @@ fn test_scheduler_timer_fires_and_unblocks() {
     use std::time::Duration;
 
     let mut sched = Scheduler::new();
-    let _id = sched.spawn(0, 1024);
+    let _id = sched.spawn(0, 1024, 256);
     let task = sched.pop_next().unwrap();
     let task_id = task.id;
 
@@ -106,8 +107,8 @@ fn test_scheduler_timer_fires_and_unblocks() {
 #[test]
 fn test_scheduler_await_waiter_unblocked_on_completion() {
     let mut sched = Scheduler::new();
-    let target_id = sched.spawn(0, 1024);
-    let waiter_id = sched.spawn(100, 1024);
+    let target_id = sched.spawn(0, 1024, 256);
+    let waiter_id = sched.spawn(100, 1024, 256);
 
     let waiter_task = {
         // Pop the target first
@@ -136,12 +137,12 @@ fn test_scheduler_await_waiter_unblocked_on_completion() {
 #[test]
 fn test_scheduler_iter_blocked_tasks() {
     let mut sched = Scheduler::new();
-    sched.spawn(0, 1024);
+    sched.spawn(0, 1024, 256);
     let t1 = sched.pop_next().unwrap();
     let id1 = t1.id;
     sched.block_task(t1);
 
-    sched.spawn(100, 1024);
+    sched.spawn(100, 1024, 256);
     let t2 = sched.pop_next().unwrap();
     let id2 = t2.id;
     sched.block_task(t2);

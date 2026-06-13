@@ -1,7 +1,8 @@
 use crate::pal::{PlatformAbstractionLayer, HttpRequest, HttpResponse, WsHandle, WsMessage, TimerId, Signal};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use std::net::{TcpStream, TcpListener, UdpSocket, IpAddr};
+use std::net::{UdpSocket, ToSocketAddrs, IpAddr};
+use tokio::net::{TcpStream, TcpListener};
 
 pub struct AndroidPal {
     // Android specific state
@@ -14,6 +15,7 @@ impl Default for AndroidPal {
 }
 
 // Minimal stub for Android PAL
+#[async_trait::async_trait]
 impl PlatformAbstractionLayer for AndroidPal {
     fn read_to_string(&self, _path: &Path) -> Result<String, String> { Err("Android: Not implemented".into()) }
     fn write(&self, _path: &Path, _content: &str) -> Result<(), String> { Err("Android: Not implemented".into()) }
@@ -56,8 +58,8 @@ impl PlatformAbstractionLayer for AndroidPal {
     fn handle_signal(&self, _signal: Signal, _callback: Box<dyn Fn() + Send + 'static>) -> Result<(), String> { Err("Android: Not implemented".into()) }
     fn handle_interrupt(&self) -> Result<(), String> { Err("Android: Not implemented".into()) }
 
-    fn tcp_connect(&self, _addr: &str) -> Result<TcpStream, String> { Err("Android: Not implemented".into()) }
-    fn tcp_bind(&self, _addr: &str) -> Result<TcpListener, String> { Err("Android: Not implemented".into()) }
+    async fn tcp_connect(&self, _addr: &str) -> Result<TcpStream, String> { Err("Android: Not implemented".into()) }
+    async fn tcp_bind(&self, _addr: &str) -> Result<TcpListener, String> { Err("Android: Not implemented".into()) }
     fn udp_bind(&self, _addr: &str) -> Result<UdpSocket, String> { Err("Android: Not implemented".into()) }
     fn resolve_dns(&self, _hostname: &str) -> Result<Vec<IpAddr>, String> { Err("Android: Not implemented".into()) }
 

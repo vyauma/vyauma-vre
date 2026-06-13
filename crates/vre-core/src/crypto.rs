@@ -45,7 +45,7 @@ const K: [u32; 64] = [
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-pub fn sha256(data: &[u8]) -> String {
+pub fn sha256_bytes(data: &[u8]) -> [u8; 32] {
     let mut h: [u32; 8] = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
     ];
@@ -110,9 +110,65 @@ pub fn sha256(data: &[u8]) -> String {
         h[7] = h[7].wrapping_add(k_val);
     }
 
+    let mut result_bytes = [0u8; 32];
+    for (i, &v) in h.iter().enumerate() {
+        let b = v.to_be_bytes();
+        result_bytes[i * 4] = b[0];
+        result_bytes[i * 4 + 1] = b[1];
+        result_bytes[i * 4 + 2] = b[2];
+        result_bytes[i * 4 + 3] = b[3];
+    }
+    result_bytes
+}
+
+pub fn sha256(data: &[u8]) -> String {
+    let bytes = sha256_bytes(data);
     let mut result = String::with_capacity(64);
-    for v in h {
-        result.push_str(&format!("{:08x}", v));
+    for b in bytes {
+        result.push_str(&format!("{:02x}", b));
     }
     result
+}
+
+pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        let hashed_key = sha256_bytes(key);
+        k[..32].copy_from_slice(&hashed_key);
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+
+    let mut i_key_pad = [0x36u8; 64];
+    let mut o_key_pad = [0x5cu8; 64];
+
+    for i in 0..64 {
+        i_key_pad[i] ^= k[i];
+        o_key_pad[i] ^= k[i];
+    }
+
+    let mut inner_data = Vec::with_capacity(64 + message.len());
+    inner_data.extend_from_slice(&i_key_pad);
+    inner_data.extend_from_slice(message);
+    let inner_hash = sha256_bytes(&inner_data);
+
+    let mut outer_data = Vec::with_capacity(64 + 32);
+    outer_data.extend_from_slice(&o_key_pad);
+    outer_data.extend_from_slice(&inner_hash);
+
+    sha256_bytes(&outer_data)
+}
+
+pub fn bcrypt_hash(password: &str) -> Result<String, String> {
+    match bcrypt::hash(password, bcrypt::DEFAULT_COST) {
+        Ok(hash) => Ok(hash),
+        Err(e) => Err(format!("Bcrypt Error: {}", e)),
+    }
+}
+
+pub fn bcrypt_verify(password: &str, hash: &str) -> Result<bool, String> {
+    match bcrypt::verify(password, hash) {
+        Ok(valid) => Ok(valid),
+        Err(e) => Err(format!("Bcrypt Verify Error: {}", e)),
+    }
 }

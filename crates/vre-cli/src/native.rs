@@ -268,6 +268,100 @@ pub fn register_ffi(config: &mut VreConfig) {
         Ok(vre_core::vm::value::Value::String(hash))
     });
 
+    config.insert_ffi("ffi_crypto_bcrypt".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_crypto_bcrypt expects 1 argument".to_string()); }
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected password string".to_string()),
+        };
+        let hash = vre_core::crypto::bcrypt_hash(&s)?;
+        Ok(vre_core::vm::value::Value::String(hash))
+    });
+
+    config.insert_ffi("ffi_crypto_bcrypt_verify".to_string(), |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_crypto_bcrypt_verify expects 2 arguments".to_string()); }
+        let hash = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected hash string".to_string()),
+        };
+        let password = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected password string".to_string()),
+        };
+        let valid = vre_core::crypto::bcrypt_verify(&password, &hash)?;
+        Ok(vre_core::vm::value::Value::Bool(valid))
+    });
+
+    config.insert_ffi("ffi_crypto_hmac_sha256_base64url".to_string(), |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_crypto_hmac_sha256_base64url expects 2 arguments".to_string()); }
+        let message = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected message string".to_string()),
+        };
+        let key = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected key string".to_string()),
+        };
+        let hmac = vre_core::crypto::hmac_sha256(key.as_bytes(), message.as_bytes());
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hmac);
+        Ok(vre_core::vm::value::Value::String(b64))
+    });
+
+    config.insert_ffi("ffi_crypto_base64url_encode".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_crypto_base64url_encode expects 1 argument".to_string()); }
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string".to_string()),
+        };
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s.as_bytes());
+        Ok(vre_core::vm::value::Value::String(b64))
+    });
+
+    config.insert_ffi("ffi_crypto_base64url_decode".to_string(), |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_crypto_base64url_decode expects 1 argument".to_string()); }
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string".to_string()),
+        };
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s)
+            .map_err(|e| format!("Base64 Decode Error: {}", e))?;
+        let decoded = String::from_utf8(bytes).map_err(|e| format!("UTF8 Error: {}", e))?;
+        Ok(vre_core::vm::value::Value::String(decoded))
+    });
+
+    // HTTP FFIs
+    config.register_ffi("ffi_http_get", |_heap, mut args| {
+        if args.len() != 1 { return Err("ffi_http_get expects 1 argument".to_string()); }
+        let url = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected url string".to_string()),
+        };
+        let res = ureq::get(&url).call().map_err(|e| format!("HTTP GET Error: {}", e))?;
+        let body = res.into_string().unwrap_or_else(|_| String::new());
+        Ok(vre_core::vm::value::Value::String(body))
+    }, vec![vre_core::capability::capability::Capability::new("sys.net")]);
+
+    config.register_ffi("ffi_http_post", |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_http_post expects 2 arguments".to_string()); }
+        let body = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected body string".to_string()),
+        };
+        let url = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected url string".to_string()),
+        };
+        let res = ureq::post(&url)
+            .set("Content-Type", "application/json")
+            .send_string(&body)
+            .map_err(|e| format!("HTTP POST Error: {}", e))?;
+        let resp_body = res.into_string().unwrap_or_else(|_| String::new());
+        Ok(vre_core::vm::value::Value::String(resp_body))
+    }, vec![vre_core::capability::capability::Capability::new("sys.net")]);
+
     // File I/O FFIs
     config.register_ffi("ffi_fs_exists", |_heap, mut args| {
         if args.len() != 1 { return Err("ffi_fs_exists expects 1 argument".to_string()); }
@@ -340,6 +434,23 @@ pub fn register_ffi(config: &mut VreConfig) {
         let success = vre_core::pal::get_pal().append(std::path::Path::new(&path), &content).is_ok();
         Ok(vre_core::vm::value::Value::Bool(success))
     });
+    // Network FFIs
+    config.insert_ffi("ffi_net_read".to_string(), |heap, mut args| {
+        if args.len() != 2 { return Err("ffi_net_read expects 2 args".to_string()); }
+        let max_len = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Float64(n) => n as usize,
+            _ => return Err("Expected length".to_string()),
+        };
+        let fd = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Float64(n) => n as usize,
+            _ => return Err("Expected fd".to_string()),
+        };
+        // We can't access VirtualMachine's resources from here because NativeFunction only takes Heap!
+        // Wait, NativeFunction does NOT take VirtualMachine? It only takes `&mut Heap, Vec<Value>`!
+        // That means we CANNOT access `resources` map from here!!
+        Ok(vre_core::vm::value::Value::Null)
+    });
+    
     // Console I/O FFIs
     config.insert_ffi("ffi_console_print".to_string(), |heap, mut args| {
         if args.len() != 1 { return Err("ffi_console_print expects 1 argument".to_string()); }
@@ -421,6 +532,40 @@ pub fn register_ffi(config: &mut VreConfig) {
             _ => return Err("Expected string".to_string()),
         };
         Ok(vre_core::vm::value::Value::String(main_str.replace(&old_str, &new_str)))
+    });
+
+    config.insert_ffi("ffi_string_split".to_string(), |heap, mut args| {
+        if args.len() != 2 { return Err("ffi_string_split expects 2 arguments".to_string()); }
+        let delim = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            vre_core::vm::value::Value::Reference(id) => {
+                if let vre_core::vm::memory::HeapObject::String(s) = heap.get(id).map_err(|e| format!("{:?}", e))? {
+                    s.clone()
+                } else {
+                    return Err("Expected string delimiter".to_string());
+                }
+            }
+            _ => return Err("Expected string delimiter".to_string()),
+        };
+        let s = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            vre_core::vm::value::Value::Reference(id) => {
+                if let vre_core::vm::memory::HeapObject::String(s) = heap.get(id).map_err(|e| format!("{:?}", e))? {
+                    s.clone()
+                } else {
+                    return Err("Expected string".to_string());
+                }
+            }
+            _ => return Err("Expected string".to_string()),
+        };
+        
+        let parts: Vec<vre_core::vm::value::Value> = s.split(&delim)
+            .map(|part| vre_core::vm::value::Value::String(part.to_string()))
+            .collect();
+            
+        let arr_obj = vre_core::vm::memory::HeapObject::Array(parts);
+        let arr_ref = heap.allocate(arr_obj);
+        Ok(vre_core::vm::value::Value::Reference(arr_ref))
     });
 
     config.insert_ffi("ffi_string_to_lower".to_string(), |_heap, mut args| {
@@ -1351,6 +1496,27 @@ pub fn register_ffi(config: &mut VreConfig) {
         }
     }, vec![vre_core::capability::capability::Capability::new("db.write")]);
 
+    config.register_ffi("ffi_string_join", |heap, mut args| {
+        let delimiter = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string".to_string()),
+        };
+        let array = args.pop().unwrap();
+        if let vre_core::vm::value::Value::Reference(ptr) = array {
+            if let Ok(vre_core::vm::memory::HeapObject::Array(arr)) = heap.get(ptr) {
+                let parts: Vec<String> = arr.iter().map(|v| match v {
+                    vre_core::vm::value::Value::String(s) => s.clone(),
+                    _ => "".to_string(),
+                }).collect();
+                Ok(vre_core::vm::value::Value::String(parts.join(&delimiter)))
+            } else {
+                Ok(vre_core::vm::value::Value::String("".to_string()))
+            }
+        } else {
+            Ok(vre_core::vm::value::Value::String("".to_string()))
+        }
+    }, vec![]);
+
     config.register_ffi("ffi_db_find", |_heap, mut args| {
         if args.len() != 3 { return Err("ffi_db_find expects 3 arguments (collection, filter_key, filter_value)".to_string()); }
         let filter_val = match args.pop().unwrap() {
@@ -1420,4 +1586,70 @@ pub fn register_ffi(config: &mut VreConfig) {
     config.insert_ffi("ffi_set_timeout".to_string(), |_heap, _args| {
         Ok(vre_core::vm::value::Value::Null)
     });
+    // --- Relational DB FFIs ---
+    config.register_ffi("ffi_sql_connect", |_heap, mut args| {
+        if args.len() != 2 { return Err("ffi_sql_connect expects 2 args (driver, url)".to_string()); }
+        let url = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string url".to_string()),
+        };
+        let driver = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string driver".to_string()),
+        };
+        match vre_core::db::db_connect(&driver, &url) {
+            Ok(id) => Ok(vre_core::vm::value::Value::Int32(id)),
+            Err(e) => Err(e),
+        }
+    }, vec![vre_core::capability::capability::Capability::new("db.write")]);
+
+    config.register_ffi("ffi_sql_query", |heap, mut args| {
+        if args.len() != 3 { return Err("ffi_sql_query expects 3 args (pool_id, sql, params)".to_string()); }
+        let params_val = args.pop().unwrap();
+        let sql = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string sql".to_string()),
+        };
+        let pool_id = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Int32(i) => i,
+            _ => return Err("Expected integer pool_id".to_string()),
+        };
+        
+        let mut rust_params = Vec::new();
+        if let vre_core::vm::value::Value::Reference(r) = params_val {
+            if let Ok(vre_core::vm::memory::HeapObject::Array(arr)) = heap.get(r) {
+                rust_params = arr.clone();
+            }
+        }
+
+        match vre_core::db::db_query(pool_id, &sql, rust_params, heap) {
+            Ok(val) => Ok(val),
+            Err(e) => Err(e),
+        }
+    }, vec![vre_core::capability::capability::Capability::new("db.read")]);
+
+    config.register_ffi("ffi_sql_execute", |heap, mut args| {
+        if args.len() != 3 { return Err("ffi_sql_execute expects 3 args (pool_id, sql, params)".to_string()); }
+        let params_val = args.pop().unwrap();
+        let sql = match args.pop().unwrap() {
+            vre_core::vm::value::Value::String(s) => s,
+            _ => return Err("Expected string sql".to_string()),
+        };
+        let pool_id = match args.pop().unwrap() {
+            vre_core::vm::value::Value::Int32(i) => i,
+            _ => return Err("Expected integer pool_id".to_string()),
+        };
+        
+        let mut rust_params = Vec::new();
+        if let vre_core::vm::value::Value::Reference(r) = params_val {
+            if let Ok(vre_core::vm::memory::HeapObject::Array(arr)) = heap.get(r) {
+                rust_params = arr.clone();
+            }
+        }
+
+        match vre_core::db::db_execute(pool_id, &sql, rust_params, heap) {
+            Ok(val) => Ok(val),
+            Err(e) => Err(e),
+        }
+    }, vec![vre_core::capability::capability::Capability::new("db.write")]);
 }
