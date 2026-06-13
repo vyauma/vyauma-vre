@@ -1,1 +1,0 @@
-function delayed() { ffi_console_println("Timer fired!"); } function child() { ffi_console_println("Child started"); ffi_task_sleep(50); ffi_console_println("Child done"); return 42; } function main() { ffi_set_timeout("delayed", 100); let id = ffi_task_spawn("child"); ffi_task_await(id); ffi_console_println("Main done"); } main();
