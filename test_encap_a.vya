@@ -1,7 +1,0 @@
-fn secret_func() {
-    return 42;
-}
-
-export fn public_func() {
-    return secret_func();
-}

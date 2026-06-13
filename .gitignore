@@ -14,50 +14,14 @@ test_io.txt
 
 # ── Local dev test scripts (root-level only) ─────────────────────────────────
 # These are personal smoke-test files; the stdlib/ folder IS included.
-/app.vym
-/arrays.vym
-/async_server.vym
-/async_server_stdlib.vym
-/benchmark.vym
-/dict_test.vym
-/ffi_test.vym
-/fibonacci.vym
-/gc_test.vym
-/http_server.vym
-/json_test.vym
-/main.vym
-/math.vym
-/string_test.vym
-/test_debug.vym
-/test_func.vym
-/test_io.vym
-/test_net.vym
-/test_stdlib.vym
-/test_struct.vym
-/test_trycatch.vym
-
-# Old extension names (before rename)
-/app.vy
-/arrays.vy
-/async_server.vy
-/async_server_stdlib.vy
-/benchmark.vy
-/dict_test.vy
-/ffi_test.vy
-/fibonacci.vy
-/gc_test.vy
-/http_server.vy
-/json_test.vy
-/main.vy
-/math.vy
-/string_test.vy
-/test_debug.vy
-/test_func.vy
-/test_io.vy
-/test_net.vy
-/test_stdlib.vy
-/test_struct.vy
-/test_trycatch.vy
+/test*.*
+/test_*.*
+/app.*
+/arrays.*
+/benchmark.*
+/fibonacci.*
+/main.*
+/bad.*
 
 # ── IDEs and OS noise ────────────────────────────────────────────────────────
 .vscode/
