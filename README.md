@@ -110,6 +110,25 @@ Compile raw `.vasm` assembly into `.vyma` binary format:
 cargo run --bin vre-asm -- input.vasm output.vyma
 ```
 
+### 4. The Package Manager (`vpm`)
+Manage Vyauma dependencies, workspaces, and lockfiles via the official registry:
+```bash
+cargo run --bin vpm -- install <package>
+```
+
+### 5. The Formatter (`vfmt`)
+Automatically format Vyauma source code to standard conventions:
+```bash
+cargo run --bin vfmt -- script.vya
+cargo run --bin vfmt -- script.vya --check
+```
+
+### 6. Language Server (`vyauma-analyzer`)
+LSP implementation providing real-time diagnostics, syntax checking, and IDE support:
+```bash
+cargo run --bin vyauma-analyzer
+```
+
 ---
 
 ## License
